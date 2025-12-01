@@ -341,7 +341,7 @@ if [ "$SETUP_SIDEKIQ" = true ]; then
     sudo tee "$SIDEKIQ_SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=Sidekiq Background Worker for $APP_NAME
-After=network.target
+After=syslog.target network.target
 
 [Service]
 Type=notify
@@ -358,12 +358,16 @@ WorkingDirectory=$APP_ROOT/current
 Environment=RAILS_ENV=$RAILS_ENV
 Environment=RBENV_ROOT=/home/$DEPLOY_USER/.rbenv
 Environment=PATH=/home/$DEPLOY_USER/.rbenv/shims:/home/$DEPLOY_USER/.rbenv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=MALLOC_ARENA_MAX=2
 
 # Start Sidekiq
 ExecStart=/home/$DEPLOY_USER/.rbenv/shims/bundle exec sidekiq -e $RAILS_ENV
 
+# Graceful reload (stops accepting new jobs, finishes current ones)
+ExecReload=/usr/bin/kill -TSTP \$MAINPID
+
 # Restart policy
-Restart=always
+Restart=on-failure
 RestartSec=1
 
 # Process management
@@ -502,6 +506,7 @@ if [ "$SETUP_SIDEKIQ" = true ]; then
     echo "  - Check Sidekiq status:     ${BLUE}sudo systemctl status sidekiq-${APP_NAME}${NC}"
     echo "  - Start Sidekiq:            ${BLUE}sudo systemctl start sidekiq-${APP_NAME}${NC}"
     echo "  - Stop Sidekiq:             ${BLUE}sudo systemctl stop sidekiq-${APP_NAME}${NC}"
+    echo "  - Reload Sidekiq (graceful):${BLUE}sudo systemctl reload sidekiq-${APP_NAME}${NC}"
     echo "  - Restart Sidekiq:          ${BLUE}sudo systemctl restart sidekiq-${APP_NAME}${NC}"
 fi
 echo ""
