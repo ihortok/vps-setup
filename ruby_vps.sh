@@ -363,6 +363,32 @@ else
     log_success "Redis installed: $INSTALLED_REDIS_VERSION"
 fi
 
+# Configure Redis password for security
+REDIS_PASSWORD_FILE="$HOME/.redis_password"
+REDIS_CONF="/etc/redis/redis.conf"
+
+if sudo grep -q "^requirepass" "$REDIS_CONF"; then
+    log_info "Redis password already configured"
+else
+    log_info "Configuring Redis password for security..."
+
+    # Generate a secure random password
+    REDIS_PASSWORD=$(openssl rand -base64 32)
+
+    # Add password to Redis configuration
+    echo "requirepass $REDIS_PASSWORD" | sudo tee -a "$REDIS_CONF" >/dev/null
+
+    # Restart Redis to apply changes
+    sudo systemctl restart redis-server
+
+    # Save password securely for deploy user
+    echo "$REDIS_PASSWORD" > "$REDIS_PASSWORD_FILE"
+    chmod 600 "$REDIS_PASSWORD_FILE"
+
+    log_success "Redis password configured and saved to $REDIS_PASSWORD_FILE"
+    log_warning "IMPORTANT: Save your Redis password from $REDIS_PASSWORD_FILE"
+fi
+
 log_success "Redis configured and running"
 
 ################################################################################
@@ -460,6 +486,46 @@ chmod -R u+rwX,go-w "$RBENV_ROOT"
 log_success "File permissions configured"
 
 ################################################################################
+# Configure Firewall (UFW)
+################################################################################
+
+log_info "Configuring firewall (UFW)..."
+
+# Install UFW if not already installed
+if ! command_exists ufw; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw
+fi
+
+# Check if firewall is already configured
+if sudo ufw status | grep -q "Status: active"; then
+    log_info "Firewall already active"
+else
+    log_info "Setting up firewall rules..."
+
+    # Set default policies
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
+
+    # Allow SSH (critical - don't lock yourself out!)
+    sudo ufw allow OpenSSH
+
+    # Allow HTTP and HTTPS for web traffic
+    sudo ufw allow 80/tcp comment 'HTTP'
+    sudo ufw allow 443/tcp comment 'HTTPS'
+
+    # Enable firewall (--force to avoid interactive prompt)
+    sudo ufw --force enable
+
+    log_success "Firewall configured and enabled"
+fi
+
+# Show firewall status
+log_info "Current firewall status:"
+sudo ufw status numbered
+
+log_success "Firewall configured"
+
+################################################################################
 # Cleanup
 ################################################################################
 
@@ -493,13 +559,24 @@ echo -e "${BLUE}Nginx:${NC}         $(nginx -v 2>&1 | cut -d'/' -f2)"
 echo -e "${BLUE}Passenger:${NC}     $(passenger --version | head -n1)"
 echo -e "${BLUE}libvips:${NC}       $(vips --version | head -n1)"
 echo ""
+echo "Security Configuration:"
+echo "---------------------"
+echo -e "${BLUE}Firewall:${NC}      Active (SSH, HTTP, HTTPS allowed)"
+echo -e "${BLUE}Redis Auth:${NC}    Password configured"
+if [ -f "$REDIS_PASSWORD_FILE" ]; then
+    echo -e "${YELLOW}Redis Password:${NC} $(cat $REDIS_PASSWORD_FILE)"
+    echo -e "${YELLOW}               Saved in: $REDIS_PASSWORD_FILE${NC}"
+fi
+echo ""
 echo "Next Steps:"
 echo "----------"
-echo "1. Configure Nginx virtual hosts for your applications in /etc/nginx/sites-available/"
-echo "2. Create symbolic links in /etc/nginx/sites-enabled/ to enable sites"
-echo "3. Set up your Rails/Sinatra applications using Capistrano"
-echo "4. Configure PostgreSQL databases for your applications"
-echo "5. Set up SSL certificates (e.g., using Let's Encrypt with certbot)"
+echo "1. SAVE YOUR REDIS PASSWORD from $REDIS_PASSWORD_FILE"
+echo "2. Configure Nginx virtual hosts for your applications in /etc/nginx/sites-available/"
+echo "3. Create symbolic links in /etc/nginx/sites-enabled/ to enable sites"
+echo "4. Set up your Rails/Sinatra applications using Capistrano"
+echo "5. Configure PostgreSQL databases for your applications"
+echo "6. Set up SSL certificates (e.g., using Let's Encrypt with certbot)"
+echo "7. Configure your Rails apps to use Redis password in config/cable.yml and sidekiq.yml"
 echo ""
 echo "Useful Commands:"
 echo "---------------"
@@ -509,7 +586,8 @@ echo "  - Restart Nginx:            sudo systemctl restart nginx"
 echo "  - Check Passenger status:   sudo passenger-status"
 echo "  - View Nginx error log:     sudo tail -f /var/log/nginx/error.log"
 echo "  - PostgreSQL CLI:           psql -d database_name"
-echo "  - Redis CLI:                redis-cli"
+echo "  - Redis CLI (with auth):    redis-cli -a \$(cat $REDIS_PASSWORD_FILE)"
+echo "  - Check firewall status:    sudo ufw status"
 echo ""
 echo "=========================================================================="
 echo -e "${GREEN}Your VPS is now ready for deploying Ruby applications!${NC}"
