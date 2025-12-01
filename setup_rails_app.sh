@@ -28,11 +28,12 @@
 #   --db-name NAME       - Database name (default: APP_NAME_production)
 #   --rails-env ENV      - Rails environment (default: production)
 #   --request-ssl        - Request SSL certificate via Certbot (default: false)
+#   --setup-sidekiq      - Set up Sidekiq as systemd service (default: false)
 #
 # Examples:
 #   ./setup_rails_app.sh wallet wallet.example.io
 #   ./setup_rails_app.sh events events.example.io --db-name events_prod
-#   ./setup_rails_app.sh example example.io --request-ssl
+#   ./setup_rails_app.sh example example.io --request-ssl --setup-sidekiq
 #
 ################################################################################
 
@@ -79,10 +80,11 @@ if [ $# -lt 2 ]; then
     echo "  --db-name NAME       - Database name (default: APP_NAME_production)"
     echo "  --rails-env ENV      - Rails environment (default: production)"
     echo "  --request-ssl        - Request SSL certificate via Certbot (default: false)"
+    echo "  --setup-sidekiq      - Set up Sidekiq as systemd service (default: false)"
     echo ""
     echo "Example:"
     echo "  $0 wallet wallet.example.io"
-    echo "  $0 wallet wallet.example.io --request-ssl"
+    echo "  $0 wallet wallet.example.io --request-ssl --setup-sidekiq"
     exit 1
 fi
 
@@ -94,6 +96,7 @@ shift 2
 DB_NAME="${APP_NAME}_production"
 RAILS_ENV="production"
 REQUEST_SSL=false
+SETUP_SIDEKIQ=false
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -108,6 +111,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --request-ssl)
             REQUEST_SSL=true
+            shift
+            ;;
+        --setup-sidekiq)
+            SETUP_SIDEKIQ=true
             shift
             ;;
         *)
@@ -192,6 +199,7 @@ echo -e "${BLUE}Database:${NC}        $DB_NAME"
 echo -e "${BLUE}Rails Env:${NC}       $RAILS_ENV"
 echo -e "${BLUE}App Root:${NC}        $APP_ROOT"
 echo -e "${BLUE}SSL:${NC}             $([ "$REQUEST_SSL" = true ] && echo "Will request certificate via Certbot" || echo "Not requested (use --request-ssl to enable)")"
+echo -e "${BLUE}Sidekiq:${NC}         $([ "$SETUP_SIDEKIQ" = true ] && echo "Will set up as systemd service" || echo "Not requested (use --setup-sidekiq to enable)")"
 echo "=========================================================================="
 echo ""
 
@@ -320,6 +328,76 @@ else
 fi
 
 ################################################################################
+# Set Up Sidekiq Systemd Service (Optional)
+################################################################################
+
+if [ "$SETUP_SIDEKIQ" = true ]; then
+    log_info "Setting up Sidekiq as systemd service..."
+
+    SIDEKIQ_SERVICE="sidekiq-${APP_NAME}"
+    SIDEKIQ_SERVICE_FILE="/etc/systemd/system/${SIDEKIQ_SERVICE}.service"
+
+    # Create systemd service file
+    sudo tee "$SIDEKIQ_SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=Sidekiq Background Worker for $APP_NAME
+After=network.target
+
+[Service]
+Type=notify
+WatchdogSec=10
+
+# Run as deploy user
+User=$DEPLOY_USER
+Group=$DEPLOY_USER
+
+# Working directory (Capistrano current release)
+WorkingDirectory=$APP_ROOT/current
+
+# Environment
+Environment=RAILS_ENV=$RAILS_ENV
+Environment=RBENV_ROOT=/home/$DEPLOY_USER/.rbenv
+Environment=PATH=/home/$DEPLOY_USER/.rbenv/shims:/home/$DEPLOY_USER/.rbenv/bin:/usr/local/bin:/usr/bin:/bin
+
+# Start Sidekiq
+ExecStart=/home/$DEPLOY_USER/.rbenv/shims/bundle exec sidekiq -e $RAILS_ENV
+
+# Restart policy
+Restart=always
+RestartSec=1
+
+# Process management
+TimeoutSec=60
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Logging
+StandardOutput=append:/home/$DEPLOY_USER/apps/$APP_NAME/shared/log/sidekiq.log
+StandardError=append:/home/$DEPLOY_USER/apps/$APP_NAME/shared/log/sidekiq.log
+SyslogIdentifier=$SIDEKIQ_SERVICE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_success "Sidekiq systemd service created: $SIDEKIQ_SERVICE_FILE"
+
+    # Reload systemd daemon
+    log_info "Reloading systemd daemon..."
+    sudo systemctl daemon-reload
+
+    # Enable service (but don't start until first deploy)
+    log_info "Enabling Sidekiq service..."
+    sudo systemctl enable "$SIDEKIQ_SERVICE"
+
+    log_success "Sidekiq service configured and enabled"
+    log_warning "Note: Service will start after first Capistrano deployment"
+    log_info "Capistrano should restart Sidekiq after each deployment"
+else
+    log_info "Sidekiq systemd service not requested (use --setup-sidekiq to enable)"
+fi
+
+################################################################################
 # Set Permissions
 ################################################################################
 
@@ -355,6 +433,9 @@ echo "  - Nginx virtual host: $NGINX_CONFIG (enabled and active)"
 if [ "$REQUEST_SSL" = true ]; then
     echo "  - SSL certificate: $([ -d "/etc/letsencrypt/live/$DOMAIN" ] && echo "✓ Configured" || echo "✗ Failed (see warnings above)")"
 fi
+if [ "$SETUP_SIDEKIQ" = true ]; then
+    echo "  - Sidekiq systemd service: sidekiq-${APP_NAME} (enabled, will start after first deploy)"
+fi
 echo ""
 echo -e "${BLUE}Note:${NC} Capistrano will create the full directory structure (releases/, shared/, etc.) on first deploy"
 echo ""
@@ -378,18 +459,28 @@ if [ -f "$REDIS_PASSWORD_FILE" ]; then
     echo "   ${YELLOW}Redis Password:${NC} $REDIS_PASSWORD"
     echo "   ${BLUE}Update config/cable.yml and sidekiq.yml with this password${NC}"
     echo ""
-    echo "4. Deploy your application:"
+    NEXT_STEP=4
 else
-    echo "3. Deploy your application:"
+    NEXT_STEP=3
 fi
+
+if [ "$SETUP_SIDEKIQ" = true ]; then
+    echo "$NEXT_STEP. Configure Capistrano to restart Sidekiq (Capfile):"
+    echo "   ${BLUE}require 'capistrano/sidekiq'${NC}"
+    echo ""
+    echo "   Add to Gemfile:"
+    echo "   ${BLUE}gem 'capistrano-sidekiq', group: :development${NC}"
+    echo ""
+    NEXT_STEP=$((NEXT_STEP + 1))
+fi
+
+echo "$NEXT_STEP. Deploy your application:"
 echo "   ${BLUE}cap $RAILS_ENV deploy${NC}"
 echo ""
+
 if [ "$REQUEST_SSL" = false ]; then
-    if [ -f "$REDIS_PASSWORD_FILE" ]; then
-        echo "5. Set up SSL certificate (optional, after first successful deploy):"
-    else
-        echo "4. Set up SSL certificate (optional, after first successful deploy):"
-    fi
+    NEXT_STEP=$((NEXT_STEP + 1))
+    echo "$NEXT_STEP. Set up SSL certificate (optional, after first successful deploy):"
     echo "   ${BLUE}sudo certbot --nginx -d $DOMAIN${NC}"
     echo ""
 fi
@@ -405,6 +496,13 @@ echo "  - Connect to database:      ${BLUE}psql -d $DB_NAME${NC}"
 if [ "$REQUEST_SSL" = true ]; then
     echo "  - Check SSL certificate:    ${BLUE}sudo certbot certificates${NC}"
     echo "  - Renew SSL (if needed):    ${BLUE}sudo certbot renew${NC}"
+fi
+if [ "$SETUP_SIDEKIQ" = true ]; then
+    echo "  - View Sidekiq log:         ${BLUE}tail -f $APP_ROOT/shared/log/sidekiq.log${NC}"
+    echo "  - Check Sidekiq status:     ${BLUE}sudo systemctl status sidekiq-${APP_NAME}${NC}"
+    echo "  - Start Sidekiq:            ${BLUE}sudo systemctl start sidekiq-${APP_NAME}${NC}"
+    echo "  - Stop Sidekiq:             ${BLUE}sudo systemctl stop sidekiq-${APP_NAME}${NC}"
+    echo "  - Restart Sidekiq:          ${BLUE}sudo systemctl restart sidekiq-${APP_NAME}${NC}"
 fi
 echo ""
 echo "=========================================================================="
