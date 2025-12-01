@@ -146,7 +146,7 @@ PACKAGES=(
 
     libsqlite3-dev
 
-    # Image processing (for image_processing gem used in aronnax and events)
+    # Image processing (for image_processing gem)
     libvips
     libvips-dev
 

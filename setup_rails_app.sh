@@ -21,7 +21,7 @@
 #   ./setup_rails_app.sh APP_NAME DOMAIN [OPTIONS]
 #
 # Arguments:
-#   APP_NAME    - Application name (e.g., "wallet", "events", "aronnax")
+#   APP_NAME    - Application name (e.g., "wallet", "events", "blog")
 #   DOMAIN      - Domain or subdomain (e.g., "wallet.example.com")
 #
 # Options:
@@ -30,9 +30,9 @@
 #   --request-ssl        - Request SSL certificate via Certbot (default: false)
 #
 # Examples:
-#   ./setup_rails_app.sh wallet wallet.aronnax.io
-#   ./setup_rails_app.sh events events.aronnax.io --db-name events_prod
-#   ./setup_rails_app.sh aronnax aronnax.io --request-ssl
+#   ./setup_rails_app.sh wallet wallet.example.io
+#   ./setup_rails_app.sh events events.example.io --db-name events_prod
+#   ./setup_rails_app.sh example example.io --request-ssl
 #
 ################################################################################
 
@@ -81,8 +81,8 @@ if [ $# -lt 2 ]; then
     echo "  --request-ssl        - Request SSL certificate via Certbot (default: false)"
     echo ""
     echo "Example:"
-    echo "  $0 wallet wallet.aronnax.io"
-    echo "  $0 wallet wallet.aronnax.io --request-ssl"
+    echo "  $0 wallet wallet.example.io"
+    echo "  $0 wallet wallet.example.io --request-ssl"
     exit 1
 fi
 
