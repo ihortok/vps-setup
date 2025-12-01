@@ -391,40 +391,43 @@ fi
 if command_exists nginx && command_exists passenger; then
     log_info "Passenger and Nginx already installed"
 else
-    log_info "Installing libnginx-mod-http-passenger..."
+    log_info "Installing libnginx-mod-http-passenger and Nginx..."
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libnginx-mod-http-passenger nginx
 
     log_success "Passenger + Nginx installed"
 fi
 
-# Ensure Passenger Nginx module is enabled
-if [ ! -f /etc/nginx/modules-enabled/50-mod-http-passenger.conf ]; then
-    log_info "Enabling Passenger Nginx module..."
-    if [ -f /usr/share/nginx/modules-available/mod-http-passenger.load ]; then
-        sudo ln -s /usr/share/nginx/modules-available/mod-http-passenger.load /etc/nginx/modules-enabled/50-mod-http-passenger.conf
-    fi
-fi
-
-# Configure Passenger to use the correct Ruby
+# Configure Passenger to use rbenv Ruby
 PASSENGER_CONF="/etc/nginx/conf.d/mod-http-passenger.conf"
-if [ -f "$PASSENGER_CONF" ]; then
-    RBENV_RUBY_PATH="$HOME/.rbenv/shims/ruby"
+RBENV_RUBY_PATH="/home/$DEPLOY_USER/.rbenv/shims/ruby"
 
-    # Check if passenger_ruby is already configured correctly
+log_info "Configuring Passenger to use rbenv Ruby..."
+
+# Create or update Passenger configuration
+if [ ! -f "$PASSENGER_CONF" ]; then
+    # Create new config file
+    sudo tee "$PASSENGER_CONF" >/dev/null <<EOF
+# Phusion Passenger configuration
+passenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;
+passenger_ruby $RBENV_RUBY_PATH;
+EOF
+    log_success "Created Passenger configuration"
+else
+    # Update existing config
     if ! sudo grep -q "passenger_ruby $RBENV_RUBY_PATH" "$PASSENGER_CONF"; then
-        log_info "Configuring Passenger to use rbenv Ruby..."
-
         # Backup original config
         sudo cp "$PASSENGER_CONF" "${PASSENGER_CONF}.bak"
 
         # Update or add passenger_ruby directive
         if sudo grep -q "passenger_ruby" "$PASSENGER_CONF"; then
-            sudo sed -i "s|passenger_ruby .*|passenger_ruby $RBENV_RUBY_PATH;|" "$PASSENGER_CONF"
+            sudo sed -i "s|passenger_ruby .*;|passenger_ruby $RBENV_RUBY_PATH;|" "$PASSENGER_CONF"
         else
             echo "passenger_ruby $RBENV_RUBY_PATH;" | sudo tee -a "$PASSENGER_CONF" >/dev/null
         fi
 
-        log_success "Passenger configured to use rbenv Ruby"
+        log_success "Updated Passenger configuration to use rbenv Ruby"
+    else
+        log_info "Passenger already configured to use rbenv Ruby"
     fi
 fi
 
