@@ -47,7 +47,7 @@ set -euo pipefail
 DEPLOY_USER="deploy"
 RUBY_VERSION="3.4.7"  # Latest stable as of January 2025
 NODE_VERSION="24"     # LTS version
-POSTGRESQL_VERSION="16"
+# POSTGRESQL_VERSION="16"  # Not needed - using Ubuntu's default PostgreSQL 14
 
 ################################################################################
 # Color codes for output
@@ -293,25 +293,22 @@ else
 fi
 
 ################################################################################
-# Install PostgreSQL
+# Install PostgreSQL (Ubuntu default - version 14)
 ################################################################################
 
-log_info "Installing PostgreSQL $POSTGRESQL_VERSION..."
+log_info "Installing PostgreSQL..."
 
 if command_exists psql; then
     CURRENT_PG_VERSION=$(psql --version)
     log_info "PostgreSQL already installed: $CURRENT_PG_VERSION"
 else
-    log_info "Adding PostgreSQL APT repository..."
-    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-    wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+    log_info "Installing PostgreSQL server and contrib extensions..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        postgresql \
+        postgresql-contrib
 
-    sudo apt-get update -qq
-
-    log_info "Installing PostgreSQL server and client..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "postgresql-$POSTGRESQL_VERSION" "postgresql-client-$POSTGRESQL_VERSION"
-
-    log_success "PostgreSQL $POSTGRESQL_VERSION installed"
+    INSTALLED_PG_VERSION=$(psql --version 2>/dev/null || echo "PostgreSQL 14")
+    log_success "PostgreSQL installed: $INSTALLED_PG_VERSION"
 fi
 
 # Ensure PostgreSQL is running
@@ -324,8 +321,9 @@ log_info "Configuring PostgreSQL role for $DEPLOY_USER..."
 if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DEPLOY_USER'" | grep -q 1; then
     log_info "PostgreSQL role '$DEPLOY_USER' already exists"
 else
-    sudo -u postgres createuser -s "$DEPLOY_USER"
-    log_success "PostgreSQL role '$DEPLOY_USER' created with superuser privileges"
+    # Create user with CREATEDB privilege (not superuser for security)
+    sudo -u postgres createuser -d "$DEPLOY_USER"
+    log_success "PostgreSQL role '$DEPLOY_USER' created with CREATEDB privilege"
 fi
 
 log_success "PostgreSQL configured"
