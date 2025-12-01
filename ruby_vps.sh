@@ -486,6 +486,38 @@ chmod -R u+rwX,go-w "$RBENV_ROOT"
 log_success "File permissions configured"
 
 ################################################################################
+# Install Certbot (Let's Encrypt SSL)
+################################################################################
+
+log_info "Installing Certbot for SSL certificates..."
+
+if command_exists certbot; then
+    log_info "Certbot already installed: $(certbot --version)"
+else
+    log_info "Installing Certbot and Nginx plugin..."
+
+    # Install snapd if not present (Certbot's recommended installation method)
+    if ! command_exists snap; then
+        sudo apt-get install -y -qq snapd
+        sudo snap install core
+        sudo snap refresh core
+    fi
+
+    # Remove old certbot packages if present
+    sudo apt-get remove -y -qq certbot &>/dev/null || true
+
+    # Install certbot via snap (official recommended method)
+    sudo snap install --classic certbot
+
+    # Create symbolic link
+    sudo ln -sf /snap/bin/certbot /usr/bin/certbot
+
+    log_success "Certbot installed: $(certbot --version)"
+fi
+
+log_success "Certbot ready for SSL certificate requests"
+
+################################################################################
 # Configure Firewall (UFW)
 ################################################################################
 

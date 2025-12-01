@@ -27,12 +27,12 @@
 # Options:
 #   --db-name NAME       - Database name (default: APP_NAME_production)
 #   --rails-env ENV      - Rails environment (default: production)
-#   --skip-ssl           - Skip SSL/HTTPS configuration
+#   --request-ssl        - Request SSL certificate via Certbot (default: false)
 #
 # Examples:
 #   ./setup_rails_app.sh wallet wallet.aronnax.io
 #   ./setup_rails_app.sh events events.aronnax.io --db-name events_prod
-#   ./setup_rails_app.sh aronnax aronnax.io --skip-ssl
+#   ./setup_rails_app.sh aronnax aronnax.io --request-ssl
 #
 ################################################################################
 
@@ -78,10 +78,11 @@ if [ $# -lt 2 ]; then
     echo "Options:"
     echo "  --db-name NAME       - Database name (default: APP_NAME_production)"
     echo "  --rails-env ENV      - Rails environment (default: production)"
-    echo "  --skip-ssl           - Skip SSL/HTTPS configuration"
+    echo "  --request-ssl        - Request SSL certificate via Certbot (default: false)"
     echo ""
     echo "Example:"
     echo "  $0 wallet wallet.aronnax.io"
+    echo "  $0 wallet wallet.aronnax.io --request-ssl"
     exit 1
 fi
 
@@ -92,7 +93,7 @@ shift 2
 # Default values
 DB_NAME="${APP_NAME}_production"
 RAILS_ENV="production"
-SKIP_SSL=false
+REQUEST_SSL=false
 
 # Parse options
 while [[ $# -gt 0 ]]; do
@@ -105,8 +106,8 @@ while [[ $# -gt 0 ]]; do
             RAILS_ENV="$2"
             shift 2
             ;;
-        --skip-ssl)
-            SKIP_SSL=true
+        --request-ssl)
+            REQUEST_SSL=true
             shift
             ;;
         *)
@@ -167,6 +168,14 @@ if ! [[ "$DOMAIN" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
     exit 1
 fi
 
+# Check if Certbot is installed when SSL is requested
+if [ "$REQUEST_SSL" = true ]; then
+    if ! command -v certbot &> /dev/null; then
+        log_error "Certbot is not installed. Please run ruby_vps.sh first or install Certbot manually."
+        exit 1
+    fi
+fi
+
 log_success "Environment validated"
 
 ################################################################################
@@ -182,7 +191,7 @@ echo -e "${BLUE}Domain:${NC}          $DOMAIN"
 echo -e "${BLUE}Database:${NC}        $DB_NAME"
 echo -e "${BLUE}Rails Env:${NC}       $RAILS_ENV"
 echo -e "${BLUE}App Root:${NC}        $APP_ROOT"
-echo -e "${BLUE}SSL:${NC}             $([ "$SKIP_SSL" = true ] && echo "Skipped (manual setup required)" || echo "Will configure after first deploy")"
+echo -e "${BLUE}SSL:${NC}             $([ "$REQUEST_SSL" = true ] && echo "Will request certificate via Certbot" || echo "Not requested (use --request-ssl to enable)")"
 echo "=========================================================================="
 echo ""
 
@@ -241,9 +250,6 @@ server {
     listen [::]:80;
     server_name $DOMAIN;
 
-    # Redirect to HTTPS (uncomment after SSL is set up)
-    # return 301 https://\$server_name\$request_uri;
-
     root $APP_ROOT/current/public;
 
     # Enable Passenger
@@ -272,57 +278,7 @@ server {
     error_page 500 502 503 504 /500.html;
     error_page 404 /404.html;
     error_page 422 /422.html;
-
-    location = /500.html {
-        root $APP_ROOT/current/public;
-    }
-
-    location = /404.html {
-        root $APP_ROOT/current/public;
-    }
-
-    location = /422.html {
-        root $APP_ROOT/current/public;
-    }
 }
-
-# HTTPS configuration (uncomment and configure after running certbot)
-# server {
-#     listen 443 ssl http2;
-#     listen [::]:443 ssl http2;
-#     server_name $DOMAIN;
-#
-#     # SSL certificates (managed by certbot)
-#     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-#     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-#     include /etc/letsencrypt/options-ssl-nginx.conf;
-#     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-#
-#     root $APP_ROOT/current/public;
-#
-#     passenger_enabled on;
-#     passenger_app_env $RAILS_ENV;
-#     passenger_ruby /home/$DEPLOY_USER/.rbenv/shims/ruby;
-#     passenger_preload_bundler on;
-#
-#     # Action Cable WebSocket support
-#     location /cable {
-#         passenger_app_group_name ${APP_NAME}_websocket;
-#         passenger_force_max_concurrent_requests_per_process 0;
-#     }
-#
-#     client_max_body_size 100m;
-#
-#     location ~ ^/(assets|packs) {
-#         gzip_static on;
-#         expires max;
-#         add_header Cache-Control public;
-#     }
-#
-#     error_page 500 502 503 504 /500.html;
-#     error_page 404 /404.html;
-#     error_page 422 /422.html;
-# }
 EOF
 
 log_success "Nginx configuration created: $NGINX_CONFIG"
@@ -348,6 +304,19 @@ else
     log_error "Nginx configuration test failed"
     log_error "Please fix the configuration before deploying"
     exit 1
+fi
+
+################################################################################
+# Request SSL Certificate (Optional)
+################################################################################
+
+if [ "$REQUEST_SSL" = true ]; then
+    log_info "Requesting SSL certificate from Let's Encrypt..."
+
+    # Run certbot with Nginx plugin
+    sudo certbot --nginx -d "$DOMAIN"
+else
+    log_info "SSL certificate not requested (use --request-ssl to enable)"
 fi
 
 ################################################################################
@@ -383,6 +352,9 @@ echo "-------------------"
 echo "  - Application directory: $APP_ROOT"
 echo "  - PostgreSQL database: $DB_NAME (owned by $DEPLOY_USER)"
 echo "  - Nginx virtual host: $NGINX_CONFIG (enabled and active)"
+if [ "$REQUEST_SSL" = true ]; then
+    echo "  - SSL certificate: $([ -d "/etc/letsencrypt/live/$DOMAIN" ] && echo "✓ Configured" || echo "✗ Failed (see warnings above)")"
+fi
 echo ""
 echo -e "${BLUE}Note:${NC} Capistrano will create the full directory structure (releases/, shared/, etc.) on first deploy"
 echo ""
@@ -412,14 +384,13 @@ else
 fi
 echo "   ${BLUE}cap $RAILS_ENV deploy${NC}"
 echo ""
-if [ "$SKIP_SSL" = false ]; then
+if [ "$REQUEST_SSL" = false ]; then
     if [ -f "$REDIS_PASSWORD_FILE" ]; then
-        echo "5. Set up SSL certificate (after first successful deploy):"
+        echo "5. Set up SSL certificate (optional, after first successful deploy):"
     else
-        echo "4. Set up SSL certificate (after first successful deploy):"
+        echo "4. Set up SSL certificate (optional, after first successful deploy):"
     fi
     echo "   ${BLUE}sudo certbot --nginx -d $DOMAIN${NC}"
-    echo "   ${BLUE}# Then uncomment HTTPS server block in $NGINX_CONFIG${NC}"
     echo ""
 fi
 echo "Useful Commands:"
@@ -431,6 +402,10 @@ echo "  - Check Passenger status:   ${BLUE}sudo passenger-status${NC}"
 echo "  - Test Nginx config:        ${BLUE}sudo nginx -t${NC}"
 echo "  - Reload Nginx:             ${BLUE}sudo systemctl reload nginx${NC}"
 echo "  - Connect to database:      ${BLUE}psql -d $DB_NAME${NC}"
+if [ "$REQUEST_SSL" = true ]; then
+    echo "  - Check SSL certificate:    ${BLUE}sudo certbot certificates${NC}"
+    echo "  - Renew SSL (if needed):    ${BLUE}sudo certbot renew${NC}"
+fi
 echo ""
 echo "=========================================================================="
 echo -e "${GREEN}Ready for Capistrano deployment!${NC}"
