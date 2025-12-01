@@ -45,8 +45,8 @@ set -euo pipefail
 ################################################################################
 
 DEPLOY_USER="deploy"
-RUBY_VERSION="3.3.6"  # Latest stable as of January 2025
-NODE_VERSION="20"     # LTS version
+RUBY_VERSION="3.4.7"  # Latest stable as of January 2025
+NODE_VERSION="24"     # LTS version
 POSTGRESQL_VERSION="16"
 
 ################################################################################
@@ -134,18 +134,21 @@ PACKAGES=(
     libyaml-dev
     libreadline6-dev
     zlib1g-dev
-    libgmp-dev
-    libncurses5-dev
+    # libgmp-dev          # Rarely needed for web apps, can skip
+    # libncurses5-dev     # Terminal UI library, rarely needed for Rails
     libffi-dev
     libgdbm6
     libgdbm-dev
-    libdb-dev
+    # libdb-dev           # Berkeley DB, rarely used in modern Rails
 
     # PostgreSQL client libraries
     libpq-dev
 
-    # SQLite
     libsqlite3-dev
+
+    # Image processing (for image_processing gem used in aronnax and events)
+    libvips
+    libvips-dev
 
     # Version control
     git
@@ -243,10 +246,19 @@ log_success "Ruby environment configured"
 
 log_info "Installing Node.js $NODE_VERSION LTS..."
 
+# Check if correct Node.js version is installed
+NEEDS_NODE_INSTALL=true
 if command_exists node; then
-    CURRENT_NODE_VERSION=$(node -v)
-    log_info "Node.js already installed: $CURRENT_NODE_VERSION"
-else
+    CURRENT_NODE_MAJOR=$(node -v | cut -d'.' -f1 | sed 's/v//')
+    if [ "$CURRENT_NODE_MAJOR" = "$NODE_VERSION" ]; then
+        log_info "Node.js $NODE_VERSION already installed: $(node -v)"
+        NEEDS_NODE_INSTALL=false
+    else
+        log_warning "Node.js $CURRENT_NODE_MAJOR found, but Node.js $NODE_VERSION required. Upgrading..."
+    fi
+fi
+
+if [ "$NEEDS_NODE_INSTALL" = true ]; then
     log_info "Adding NodeSource repository..."
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | sudo -E bash -
 
@@ -258,24 +270,26 @@ else
 fi
 
 ################################################################################
-# Install Yarn
+# Install Yarn (via Corepack - modern approach)
 ################################################################################
 
 log_info "Installing Yarn..."
 
-if command_exists yarn; then
+if command_exists yarn && [ "$(yarn -v 2>/dev/null)" ]; then
     CURRENT_YARN_VERSION=$(yarn -v)
     log_info "Yarn already installed: $CURRENT_YARN_VERSION"
 else
-    log_info "Adding Yarn repository..."
-    curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-    echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
+    log_info "Enabling Corepack (built-in package manager for Yarn/pnpm)..."
 
-    sudo apt-get update -qq
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq yarn
+    # Corepack is included with Node.js 16+ but needs to be enabled
+    sudo corepack enable
+
+    # Install latest stable Yarn
+    log_info "Installing Yarn via Corepack..."
+    corepack prepare yarn@stable --activate
 
     INSTALLED_YARN_VERSION=$(yarn -v)
-    log_success "Yarn installed: $INSTALLED_YARN_VERSION"
+    log_success "Yarn installed via Corepack: $INSTALLED_YARN_VERSION"
 fi
 
 ################################################################################
@@ -476,6 +490,7 @@ echo -e "${BLUE}SQLite:${NC}        $(sqlite3 --version | cut -d' ' -f1-3)"
 echo -e "${BLUE}Redis:${NC}         $(redis-server --version | cut -d' ' -f3-4)"
 echo -e "${BLUE}Nginx:${NC}         $(nginx -v 2>&1 | cut -d'/' -f2)"
 echo -e "${BLUE}Passenger:${NC}     $(passenger --version | head -n1)"
+echo -e "${BLUE}libvips:${NC}       $(vips --version | head -n1)"
 echo ""
 echo "Next Steps:"
 echo "----------"
