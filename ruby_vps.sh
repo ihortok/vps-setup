@@ -485,7 +485,7 @@ else
 
     # Install snapd if not present (Certbot's recommended installation method)
     if ! command_exists snap; then
-        sudo apt-get install -y -qq snapd
+        sudo apt-get install -y -qq --no-install-recommends snapd
         sudo snap install core
         sudo snap refresh core
     fi
