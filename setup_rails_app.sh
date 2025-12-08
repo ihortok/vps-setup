@@ -221,6 +221,58 @@ mkdir -p "$APP_ROOT"
 
 log_success "Application directory created: $APP_ROOT"
 
+# Create placeholder directory structure for testing
+log_info "Creating placeholder public directory..."
+mkdir -p "$APP_ROOT/current/public"
+
+# Create simple index.html for testing Nginx configuration
+cat > "$APP_ROOT/current/public/index.html" <<'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World!</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+        }
+        h1 {
+            font-size: 3em;
+            margin: 0;
+        }
+        p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello World!</h1>
+        <p>Nginx is configured correctly.</p>
+        <p>Ready for deployment.</p>
+    </div>
+</body>
+</html>
+EOF
+
+# Set proper ownership
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
+
+log_success "Placeholder index.html created for testing"
+log_info "You can now visit http://$DOMAIN to test the Nginx configuration"
+
 ################################################################################
 # Create PostgreSQL Database
 ################################################################################
