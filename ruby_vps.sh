@@ -127,27 +127,16 @@ PACKAGES=(
     autoconf
     bison
     patch
-    rustc
 
     # Development libraries
     libssl-dev
     libyaml-dev
-    libreadline6-dev
+    libreadline-dev
     zlib1g-dev
-    # libgmp-dev          # Rarely needed for web apps, can skip
-    # libncurses5-dev     # Terminal UI library, rarely needed for Rails
     libffi-dev
-    libgdbm6
     libgdbm-dev
-    # libdb-dev           # Berkeley DB, rarely used in modern Rails
-
-    # PostgreSQL client libraries
-    libpq-dev
-
-    libsqlite3-dev
 
     # Image processing (for image_processing gem)
-    libvips
     libvips-dev
 
     # Version control
@@ -156,11 +145,8 @@ PACKAGES=(
     # Utilities
     curl
     wget
-    gnupg2
+    gnupg
     ca-certificates
-    lsb-release
-    apt-transport-https
-    software-properties-common
 )
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PACKAGES[@]}"
@@ -305,7 +291,8 @@ else
     log_info "Installing PostgreSQL server and contrib extensions..."
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         postgresql \
-        postgresql-contrib
+        postgresql-contrib \
+        libpq-dev
 
     INSTALLED_PG_VERSION=$(psql --version 2>/dev/null || echo "PostgreSQL 14")
     log_success "PostgreSQL installed: $INSTALLED_PG_VERSION"
