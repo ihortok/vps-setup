@@ -136,8 +136,11 @@ PACKAGES=(
     libffi-dev
     libgdbm-dev
 
-    # Image processing (for image_processing gem)
-    libvips-dev
+    # Image processing (for image_processing gem + ruby-vips)
+    # Note: ruby-vips uses FFI (no native extensions). Modern FFI gem (1.17+)
+    # ships precompiled binaries for x86_64-linux, so no compilation needed.
+    # Only the runtime library is required. Saves ~50-100 MB vs libvips-dev.
+    libvips42
 
     # Version control
     git
@@ -149,7 +152,7 @@ PACKAGES=(
     ca-certificates
 )
 
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PACKAGES[@]}"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${PACKAGES[@]}"
 
 log_success "System build tools and dependencies installed"
 
@@ -249,7 +252,7 @@ if [ "$NEEDS_NODE_INSTALL" = true ]; then
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | sudo -E bash -
 
     log_info "Installing Node.js..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nodejs
 
     INSTALLED_NODE_VERSION=$(node -v)
     log_success "Node.js installed: $INSTALLED_NODE_VERSION"
@@ -289,7 +292,7 @@ if command_exists psql; then
     log_info "PostgreSQL already installed: $CURRENT_PG_VERSION"
 else
     log_info "Installing PostgreSQL server and contrib extensions..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
         postgresql \
         postgresql-contrib \
         libpq-dev
@@ -325,7 +328,7 @@ if command_exists sqlite3; then
     CURRENT_SQLITE_VERSION=$(sqlite3 --version)
     log_info "SQLite already installed: $CURRENT_SQLITE_VERSION"
 else
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 libsqlite3-dev
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends sqlite3 libsqlite3-dev
     INSTALLED_SQLITE_VERSION=$(sqlite3 --version)
     log_success "SQLite installed: $INSTALLED_SQLITE_VERSION"
 fi
@@ -340,7 +343,7 @@ if command_exists redis-server; then
     CURRENT_REDIS_VERSION=$(redis-server --version)
     log_info "Redis already installed: $CURRENT_REDIS_VERSION"
 else
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq redis-server
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends redis-server
 
     # Configure Redis to start on boot
     sudo systemctl enable redis-server
@@ -387,7 +390,7 @@ log_info "Installing Passenger + Nginx from official Passenger APT repository...
 # Add Passenger APT repository
 if [ ! -f /etc/apt/sources.list.d/passenger.list ]; then
     log_info "Adding Passenger APT repository..."
-    sudo apt-get install -y -qq dirmngr gnupg apt-transport-https ca-certificates curl
+    sudo apt-get install -y -qq --no-install-recommends dirmngr gnupg apt-transport-https ca-certificates curl
 
     curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | \
         gpg --dearmor | \
@@ -405,7 +408,7 @@ if command_exists nginx && command_exists passenger; then
     log_info "Passenger and Nginx already installed"
 else
     log_info "Installing libnginx-mod-http-passenger and Nginx..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libnginx-mod-http-passenger nginx
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libnginx-mod-http-passenger nginx
 
     log_success "Passenger + Nginx installed"
 fi
@@ -512,7 +515,7 @@ log_info "Configuring firewall (UFW)..."
 
 # Install UFW if not already installed
 if ! command_exists ufw; then
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ufw
 fi
 
 # Check if firewall is already configured
