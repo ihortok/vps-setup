@@ -620,6 +620,143 @@ sudo ufw status numbered
 log_success "Firewall configured"
 
 ################################################################################
+# Install fail2ban (Intrusion Prevention)
+################################################################################
+
+log_info "Installing fail2ban for intrusion prevention..."
+
+if command_exists fail2ban-client; then
+    log_info "fail2ban already installed: $(fail2ban-client version)"
+else
+    log_info "Installing fail2ban..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends fail2ban
+
+    log_info "Configuring fail2ban..."
+
+    # Create local configuration
+    sudo tee /etc/fail2ban/jail.local > /dev/null <<'EOF'
+[DEFAULT]
+# Ban duration: 1 hour
+bantime = 3600
+
+# Time window to count failures: 10 minutes
+findtime = 600
+
+# Number of failures before ban
+maxretry = 5
+
+# Email alerts (configure if needed)
+destemail = root@localhost
+sendername = Fail2Ban
+action = %(action_)s
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+bantime = 3600
+
+[nginx-http-auth]
+enabled = true
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 5
+
+[nginx-limit-req]
+enabled = true
+filter = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+bantime = 600
+EOF
+
+    # Create nginx rate limit filter
+    sudo tee /etc/fail2ban/filter.d/nginx-limit-req.conf > /dev/null <<'EOF'
+[Definition]
+failregex = limiting requests, excess: .* by zone .*, client: <HOST>
+ignoreregex =
+EOF
+
+    # Enable and start fail2ban
+    sudo systemctl enable fail2ban
+    sudo systemctl start fail2ban
+
+    log_success "fail2ban installed and configured"
+    log_info "SSH brute-force protection: 5 failed attempts = 1 hour ban"
+fi
+
+log_success "Intrusion prevention configured"
+
+################################################################################
+# Configure Automatic Security Updates
+################################################################################
+
+log_info "Configuring automatic security updates..."
+
+if dpkg -l | grep -q unattended-upgrades; then
+    log_info "unattended-upgrades already installed"
+else
+    log_info "Installing unattended-upgrades..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends unattended-upgrades apt-listchanges
+
+    log_info "Configuring automatic security updates..."
+
+    # Configure which updates to install
+    sudo tee /etc/apt/apt.conf.d/50unattended-upgrades > /dev/null <<'EOF'
+// Automatically upgrade packages from these origins
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+};
+
+// Do not automatically upgrade these packages
+Unattended-Upgrade::Package-Blacklist {
+};
+
+// Automatically remove unused kernel packages
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Automatically remove unused dependencies
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Automatically reboot if required (disabled by default for safety)
+Unattended-Upgrade::Automatic-Reboot "false";
+
+// If automatic reboot is enabled, do it at this time
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+
+// Enable logging
+Unattended-Upgrade::SyslogEnable "true";
+
+// Automatically fix interrupted dpkg
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+
+// Split upgrade into smaller steps
+Unattended-Upgrade::MinimalSteps "true";
+EOF
+
+    # Enable automatic updates
+    sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+
+    # Enable and start the service
+    sudo systemctl enable unattended-upgrades
+    sudo systemctl start unattended-upgrades
+
+    log_success "Automatic security updates enabled"
+    log_info "Security patches will be installed daily"
+    log_info "System will NOT automatically reboot (manual reboot required)"
+fi
+
+log_success "Automatic security updates configured"
+
+################################################################################
 # Cleanup
 ################################################################################
 
@@ -656,8 +793,11 @@ echo ""
 echo "Security Configuration:"
 echo "---------------------"
 echo -e "${BLUE}Firewall:${NC}      Active (SSH, HTTP, HTTPS allowed)"
+echo -e "${BLUE}fail2ban:${NC}      Active (SSH brute-force protection)"
+echo -e "${BLUE}Auto-Updates:${NC}  Enabled (security patches installed daily)"
 echo -e "${BLUE}Redis Auth:${NC}    Password configured (stored only in your password manager)"
 echo -e "${BLUE}Redis Bind:${NC}    Localhost only (127.0.0.1)"
+echo -e "${BLUE}Redis Cmds:${NC}    Dangerous commands disabled (FLUSHDB, FLUSHALL, CONFIG)"
 echo ""
 echo "Next Steps:"
 echo "----------"
@@ -679,6 +819,10 @@ echo "  - View Nginx error log:     sudo tail -f /var/log/nginx/error.log"
 echo "  - PostgreSQL CLI:           psql -d database_name"
 echo "  - Redis CLI (with auth):    redis-cli (then run: AUTH your_password)"
 echo "  - Check firewall status:    sudo ufw status"
+echo "  - Check fail2ban status:    sudo fail2ban-client status"
+echo "  - Check banned IPs (SSH):   sudo fail2ban-client status sshd"
+echo "  - Unban an IP:              sudo fail2ban-client set sshd unbanip IP_ADDRESS"
+echo "  - Check security updates:   sudo unattended-upgrades --dry-run"
 echo ""
 echo "=========================================================================="
 echo -e "${GREEN}Your VPS is now ready for deploying Ruby applications!${NC}"
