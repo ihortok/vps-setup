@@ -354,7 +354,6 @@ else
 fi
 
 # Configure Redis password for security
-REDIS_PASSWORD_FILE="$HOME/.redis_password"
 REDIS_CONF="/etc/redis/redis.conf"
 
 if sudo grep -q "^requirepass" "$REDIS_CONF"; then
@@ -362,21 +361,94 @@ if sudo grep -q "^requirepass" "$REDIS_CONF"; then
 else
     log_info "Configuring Redis password for security..."
 
-    # Generate a secure random password
-    REDIS_PASSWORD=$(openssl rand -base64 32)
+    echo ""
+    echo "==========================================================================="
+    echo -e "${YELLOW}Redis Password Configuration${NC}"
+    echo "==========================================================================="
+    echo ""
+    echo "Choose an option:"
+    echo "  1) Generate a secure random password (recommended)"
+    echo "  2) Provide your own password"
+    echo ""
+    read -p "Enter choice (1 or 2): " -r PASSWORD_CHOICE
+    echo ""
+
+    if [ "$PASSWORD_CHOICE" = "1" ]; then
+        # Generate a secure random password
+        REDIS_PASSWORD=$(openssl rand -base64 32)
+
+        echo -e "${GREEN}Generated secure password:${NC}"
+        echo ""
+        echo "┌────────────────────────────────────────────────────────┐"
+        echo -e "│  ${YELLOW}$REDIS_PASSWORD${NC}  │"
+        echo "└────────────────────────────────────────────────────────┘"
+        echo ""
+        echo -e "${RED}⚠️  IMPORTANT: Copy this password NOW to your password manager!${NC}"
+        echo -e "${RED}⚠️  It will NOT be saved to disk for security reasons.${NC}"
+        echo ""
+        read -p "Press ENTER after you have saved the password..." -r
+        echo ""
+        read -p "Type the password to confirm you saved it: " -s -r CONFIRM_PASSWORD
+        echo ""
+
+        if [ "$REDIS_PASSWORD" != "$CONFIRM_PASSWORD" ]; then
+            log_error "Passwords don't match. Redis password not configured."
+            log_error "You can re-run this script to try again."
+            exit 1
+        fi
+
+        log_success "Password confirmed!"
+
+    elif [ "$PASSWORD_CHOICE" = "2" ]; then
+        # User provides their own password
+        echo "Enter your Redis password (minimum 16 characters):"
+        read -s -r REDIS_PASSWORD
+        echo ""
+        echo "Confirm password:"
+        read -s -r REDIS_PASSWORD_CONFIRM
+        echo ""
+
+        if [ "$REDIS_PASSWORD" != "$REDIS_PASSWORD_CONFIRM" ]; then
+            log_error "Passwords don't match. Please re-run the script."
+            exit 1
+        fi
+
+        if [ ${#REDIS_PASSWORD} -lt 16 ]; then
+            log_error "Password too short (minimum 16 characters). Please re-run the script."
+            exit 1
+        fi
+
+        log_success "Password accepted"
+
+    else
+        log_error "Invalid choice. Please re-run the script."
+        exit 1
+    fi
+
+    # Bind Redis to localhost only (prevent network access)
+    if ! sudo grep -q "^bind 127.0.0.1" "$REDIS_CONF"; then
+        sudo sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$REDIS_CONF"
+    fi
 
     # Add password to Redis configuration
     echo "requirepass $REDIS_PASSWORD" | sudo tee -a "$REDIS_CONF" >/dev/null
 
+    # Disable dangerous commands
+    echo "rename-command FLUSHDB \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
+    echo "rename-command FLUSHALL \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
+    echo "rename-command CONFIG \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
+
     # Restart Redis to apply changes
     sudo systemctl restart redis-server
 
-    # Save password securely for deploy user
-    echo "$REDIS_PASSWORD" > "$REDIS_PASSWORD_FILE"
-    chmod 600 "$REDIS_PASSWORD_FILE"
+    # Clear password from memory
+    unset REDIS_PASSWORD
+    unset REDIS_PASSWORD_CONFIRM
+    unset CONFIRM_PASSWORD
 
-    log_success "Redis password configured and saved to $REDIS_PASSWORD_FILE"
-    log_warning "IMPORTANT: Save your Redis password from $REDIS_PASSWORD_FILE"
+    log_success "Redis password configured (not saved to disk)"
+    log_info "Redis is now bound to localhost only"
+    log_info "Dangerous commands (FLUSHDB, FLUSHALL, CONFIG) disabled"
 fi
 
 log_success "Redis configured and running"
@@ -584,15 +656,12 @@ echo ""
 echo "Security Configuration:"
 echo "---------------------"
 echo -e "${BLUE}Firewall:${NC}      Active (SSH, HTTP, HTTPS allowed)"
-echo -e "${BLUE}Redis Auth:${NC}    Password configured"
-if [ -f "$REDIS_PASSWORD_FILE" ]; then
-    echo -e "${YELLOW}Redis Password:${NC} $(cat $REDIS_PASSWORD_FILE)"
-    echo -e "${YELLOW}               Saved in: $REDIS_PASSWORD_FILE${NC}"
-fi
+echo -e "${BLUE}Redis Auth:${NC}    Password configured (stored only in your password manager)"
+echo -e "${BLUE}Redis Bind:${NC}    Localhost only (127.0.0.1)"
 echo ""
 echo "Next Steps:"
 echo "----------"
-echo "1. SAVE YOUR REDIS PASSWORD from $REDIS_PASSWORD_FILE"
+echo "1. Ensure you have saved your Redis password in a secure password manager"
 echo "2. Configure Nginx virtual hosts for your applications in /etc/nginx/sites-available/"
 echo "3. Create symbolic links in /etc/nginx/sites-enabled/ to enable sites"
 echo "4. Set up your Rails/Sinatra applications using Capistrano"
@@ -608,7 +677,7 @@ echo "  - Restart Nginx:            sudo systemctl restart nginx"
 echo "  - Check Passenger status:   sudo passenger-status"
 echo "  - View Nginx error log:     sudo tail -f /var/log/nginx/error.log"
 echo "  - PostgreSQL CLI:           psql -d database_name"
-echo "  - Redis CLI (with auth):    redis-cli -a \$(cat $REDIS_PASSWORD_FILE)"
+echo "  - Redis CLI (with auth):    redis-cli (then run: AUTH your_password)"
 echo "  - Check firewall status:    sudo ufw status"
 echo ""
 echo "=========================================================================="

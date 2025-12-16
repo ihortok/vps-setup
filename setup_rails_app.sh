@@ -137,9 +137,6 @@ NGINX_AVAILABLE="/etc/nginx/sites-available"
 NGINX_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONFIG="$NGINX_AVAILABLE/$APP_NAME"
 
-# Redis password (for showing in setup summary)
-REDIS_PASSWORD_FILE="$HOME/.redis_password"
-
 ################################################################################
 # Validation
 ################################################################################
@@ -516,16 +513,22 @@ echo "   ${BLUE}  database: $DB_NAME${NC}"
 echo "   ${BLUE}  username: $DEPLOY_USER${NC}"
 echo "   ${BLUE}  host: localhost${NC}"
 echo ""
-if [ -f "$REDIS_PASSWORD_FILE" ]; then
-    REDIS_PASSWORD=$(cat "$REDIS_PASSWORD_FILE")
-    echo "3. Configure Redis password in your app (if using Redis):"
-    echo "   ${YELLOW}Redis Password:${NC} $REDIS_PASSWORD"
-    echo "   ${BLUE}Update config/cable.yml and sidekiq.yml with this password${NC}"
-    echo ""
-    NEXT_STEP=4
-else
-    NEXT_STEP=3
-fi
+echo "3. Configure Redis password in your app (if using Redis):"
+echo "   ${YELLOW}Retrieve your Redis password from your password manager${NC}"
+echo "   ${BLUE}Update config/cable.yml and sidekiq.yml with this password:${NC}"
+echo ""
+echo "   ${BLUE}# config/cable.yml${NC}"
+echo "   ${BLUE}production:${NC}"
+echo "   ${BLUE}  adapter: redis${NC}"
+echo "   ${BLUE}  url: redis://:YOUR_PASSWORD@localhost:6379/1${NC}"
+echo ""
+echo "   ${BLUE}# config/sidekiq.yml (if using Sidekiq)${NC}"
+echo "   ${BLUE}:production:${NC}"
+echo "   ${BLUE}  :concurrency: 5${NC}"
+echo "   ${BLUE}  :queues:${NC}"
+echo "   ${BLUE}    - default${NC}"
+echo ""
+NEXT_STEP=4
 
 if [ "$SETUP_SIDEKIQ" = true ]; then
     echo "$NEXT_STEP. Configure Capistrano to restart Sidekiq (Capfile):"
