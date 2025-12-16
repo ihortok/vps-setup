@@ -270,6 +270,13 @@ EOF
 # Set proper ownership
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
 
+# Set permissions for Nginx/Passenger access
+# Nginx worker (www-data) needs to traverse through /home/deploy to access app files
+log_info "Setting permissions for Nginx/Passenger access..."
+DEPLOY_USER_HOME=$(eval echo ~"$DEPLOY_USER")
+chmod o+x "$DEPLOY_USER_HOME"  # Allow others to traverse through deploy user's home directory
+chmod -R o+rX "$APP_ROOT"      # Allow others to read files and traverse directories in app
+
 log_success "Placeholder index.html created for testing"
 log_info "You can now visit http://$DOMAIN to test the Nginx configuration"
 
