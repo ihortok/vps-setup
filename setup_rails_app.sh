@@ -272,7 +272,6 @@ chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_ROOT"
 log_info "Setting permissions for Nginx/Passenger access..."
 DEPLOY_USER_HOME=$(eval echo ~"$DEPLOY_USER")
 chmod o+x "$DEPLOY_USER_HOME"  # Allow others to traverse through deploy user's home directory
-chmod -R o+rX "$APP_ROOT"      # Allow others to read files and traverse directories in app
 
 log_success "Placeholder index.html created for testing"
 log_info "You can now visit http://$DOMAIN to test the Nginx configuration"
@@ -463,10 +462,30 @@ fi
 
 log_info "Setting proper permissions..."
 
-# Ensure deploy user owns the app directory
-chmod u+rwX,go-w "$APP_ROOT"
+DEPLOY_USER_HOME="/home/$DEPLOY_USER"
 
-log_success "Permissions configured"
+# Add www-data to deploy group if not already a member
+if ! groups www-data | grep -q "\bdeploy\b"; then
+    log_info "Adding www-data to deploy group..."
+    sudo usermod -a -G deploy www-data
+    log_success "www-data added to deploy group"
+else
+    log_info "www-data already in deploy group"
+fi
+
+# Make deploy user's home directory group-traversable (but not world-traversable)
+# This allows www-data (in deploy group) to traverse to app directory
+log_info "Setting secure permissions on $DEPLOY_USER_HOME..."
+chmod 750 "$DEPLOY_USER_HOME"
+
+# Set app directory ownership and permissions
+log_info "Setting permissions on $APP_ROOT..."
+sudo chgrp -R deploy "$APP_ROOT"
+# User: read/write/execute, Group: read/execute (no write), Others: no access
+sudo chmod -R u+rwX,g+rX,o-rwx "$APP_ROOT"
+
+log_success "Permissions configured securely"
+log_info "www-data can access app via deploy group membership"
 
 ################################################################################
 # Summary and Next Steps
@@ -496,6 +515,7 @@ fi
 if [ "$SETUP_SIDEKIQ" = true ]; then
     echo "  - Sidekiq systemd service: sidekiq-${APP_NAME} (enabled, will start after first deploy)"
 fi
+echo "  - Secure permissions: www-data added to deploy group (group-based access, NOT world-readable)"
 echo ""
 echo -e "${BLUE}Note:${NC} Capistrano will create the full directory structure (releases/, shared/, etc.) on first deploy"
 echo ""
