@@ -478,35 +478,18 @@ else
 fi
 
 ################################################################################
-# Set Permissions
+# Set App Directory Permissions
 ################################################################################
 
-log_info "Setting proper permissions..."
-
-DEPLOY_USER_HOME="/home/$DEPLOY_USER"
-
-# Add www-data to deploy group if not already a member
-if ! groups www-data | grep -q "\bdeploy\b"; then
-    log_info "Adding www-data to deploy group..."
-    sudo usermod -a -G deploy www-data
-    log_success "www-data added to deploy group"
-else
-    log_info "www-data already in deploy group"
-fi
-
-# Make deploy user's home directory group-traversable (but not world-traversable)
-# This allows www-data (in deploy group) to traverse to app directory
-log_info "Setting secure permissions on $DEPLOY_USER_HOME..."
-chmod 750 "$DEPLOY_USER_HOME"
+log_info "Setting app directory permissions..."
 
 # Set app directory ownership and permissions
-log_info "Setting permissions on $APP_ROOT..."
 sudo chgrp -R deploy "$APP_ROOT"
 # User: read/write/execute, Group: read/execute (no write), Others: no access
 sudo chmod -R u+rwX,g+rX,o-rwx "$APP_ROOT"
 
-log_success "Permissions configured securely"
-log_info "www-data can access app via deploy group membership"
+log_success "App directory permissions configured"
+log_info "www-data can access via deploy group (configured in ruby_vps.sh)"
 
 ################################################################################
 # Summary and Next Steps
@@ -536,7 +519,7 @@ fi
 if [ "$SETUP_SIDEKIQ" = true ]; then
     echo "  - Sidekiq systemd service: sidekiq-${APP_NAME} (enabled, will start after first deploy)"
 fi
-echo "  - Secure permissions: www-data added to deploy group (group-based access, NOT world-readable)"
+echo "  - App directory permissions: Secured with group-based access (www-data via deploy group)"
 echo ""
 echo -e "${BLUE}Note:${NC} Capistrano will create the full directory structure (releases/, shared/, etc.) on first deploy"
 echo ""

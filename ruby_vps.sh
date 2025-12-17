@@ -541,6 +541,34 @@ fi
 log_success "Passenger + Nginx configured and running"
 
 ################################################################################
+# Configure www-data for Application Access
+################################################################################
+
+log_info "Configuring www-data for application access..."
+
+# Add www-data to deploy group
+if ! groups www-data | grep -q "\bdeploy\b"; then
+    log_info "Adding www-data to deploy group..."
+    sudo usermod -a -G deploy www-data
+    log_success "www-data added to deploy group"
+
+    # Restart Nginx to apply group membership
+    log_info "Restarting Nginx to apply group membership..."
+    sudo systemctl restart nginx
+    log_success "Nginx restarted"
+else
+    log_info "www-data already in deploy group"
+fi
+
+# Set deploy home directory to group-traversable (but not world-traversable)
+DEPLOY_HOME="/home/$DEPLOY_USER"
+log_info "Setting secure permissions on $DEPLOY_HOME..."
+chmod 750 "$DEPLOY_HOME"
+log_success "Deploy home directory secured (750: owner=rwx, group=rx, others=none)"
+
+log_success "www-data configured for application access"
+
+################################################################################
 # Set Secure File Permissions
 ################################################################################
 
