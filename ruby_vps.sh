@@ -446,9 +446,10 @@ else
     unset REDIS_PASSWORD_CONFIRM
     unset CONFIRM_PASSWORD
 
-    log_success "Redis password configured (not saved to disk)"
+    log_success "Redis password configured and saved to /etc/redis/redis.conf"
     log_info "Redis is now bound to localhost only"
     log_info "Dangerous commands (FLUSHDB, FLUSHALL, CONFIG) disabled"
+    log_warning "Store your Redis password securely in your password manager"
 fi
 
 log_success "Redis configured and running"
@@ -618,6 +619,105 @@ log_info "Current firewall status:"
 sudo ufw status numbered
 
 log_success "Firewall configured"
+
+################################################################################
+# SSH Hardening Check and Configuration
+################################################################################
+
+log_info "Checking SSH security configuration..."
+
+SSHD_CONFIG="/etc/ssh/sshd_config"
+SSH_NEEDS_RELOAD=false
+
+# Check if password authentication is disabled
+if sudo grep -q "^PasswordAuthentication yes" "$SSHD_CONFIG"; then
+    log_warning "Password authentication is ENABLED"
+    echo ""
+    echo "For maximum security, password authentication should be disabled."
+    echo "This forces SSH key-only authentication."
+    echo ""
+    echo "Options:"
+    echo "  1. Disable it now (recommended if you have SSH keys configured)"
+    echo "  2. Keep it enabled (you can disable it later via VPS admin panel)"
+    echo ""
+    read -p "Disable password authentication now? (y/N): " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Disabling password authentication..."
+        sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' "$SSHD_CONFIG"
+
+        # Also ensure it's not commented out elsewhere
+        if sudo grep -q "^#PasswordAuthentication" "$SSHD_CONFIG"; then
+            sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' "$SSHD_CONFIG"
+        fi
+
+        SSH_NEEDS_RELOAD=true
+        log_success "Password authentication disabled"
+    else
+        log_warning "Password authentication still enabled. Disable it later via:"
+        log_warning "  - VPS admin panel (when reinstalling OS), OR"
+        log_warning "  - Run: sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' $SSHD_CONFIG && sudo systemctl reload sshd"
+    fi
+elif sudo grep -q "^PasswordAuthentication no" "$SSHD_CONFIG"; then
+    log_success "Password authentication is already disabled (SSH key-only)"
+else
+    # Not explicitly set, check default
+    log_info "Password authentication setting not explicit, checking default..."
+    if sudo sshd -T | grep -q "passwordauthentication yes"; then
+        log_warning "Password authentication is enabled by default"
+        echo ""
+        read -p "Disable password authentication now? (y/N): " -n 1 -r
+        echo ""
+
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Disabling password authentication..."
+            echo "" | sudo tee -a "$SSHD_CONFIG" >/dev/null
+            echo "# Disable password authentication (SSH key-only)" | sudo tee -a "$SSHD_CONFIG" >/dev/null
+            echo "PasswordAuthentication no" | sudo tee -a "$SSHD_CONFIG" >/dev/null
+            SSH_NEEDS_RELOAD=true
+            log_success "Password authentication disabled"
+        fi
+    else
+        log_success "Password authentication is disabled by default"
+    fi
+fi
+
+# Check root login
+echo ""
+log_info "Checking root login configuration..."
+if sudo grep -q "^PermitRootLogin yes" "$SSHD_CONFIG"; then
+    log_warning "Root login is ENABLED"
+    read -p "Disable root login via SSH? (y/N): " -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Disabling root login..."
+        sudo sed -i 's/^PermitRootLogin yes/PermitRootLogin no/' "$SSHD_CONFIG"
+        SSH_NEEDS_RELOAD=true
+        log_success "Root login disabled"
+    fi
+elif sudo grep -q "^PermitRootLogin no" "$SSHD_CONFIG"; then
+    log_success "Root login is already disabled"
+else
+    log_info "Root login setting uses default (usually prohibit-password)"
+fi
+
+# Reload SSH if changes were made
+if [ "$SSH_NEEDS_RELOAD" = true ]; then
+    echo ""
+    log_info "Reloading SSH service to apply changes..."
+    sudo systemctl reload sshd
+    log_success "SSH service reloaded"
+    echo ""
+    log_warning "⚠️  IMPORTANT: Test SSH connection in a NEW terminal before closing this one!"
+    log_warning "⚠️  If you get locked out, you can still access via VPS console."
+    echo ""
+    read -p "Press ENTER after you've tested SSH in another terminal..." -r
+    echo ""
+fi
+
+log_success "SSH security configuration complete"
 
 ################################################################################
 # Install fail2ban (Intrusion Prevention)
