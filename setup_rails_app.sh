@@ -308,6 +308,10 @@ sudo tee "$NGINX_CONFIG" > /dev/null <<EOF
 # Nginx + Passenger configuration for $APP_NAME
 # Domain: $DOMAIN
 
+# Rate limiting zone (10 req/sec per IP, with burst allowance)
+limit_req_zone \\\$binary_remote_addr zone=${APP_NAME}_limit:10m rate=10r/s;
+limit_req_status 429;
+
 server {
     listen 80;
     listen [::]:80;
@@ -321,20 +325,43 @@ server {
     passenger_ruby /home/$DEPLOY_USER/.rbenv/shims/ruby;
     passenger_preload_bundler on;
 
+    # Security headers
+    # Note: Most of these are also set by Rails by default (config.action_dispatch.default_headers)
+    # We set them at Nginx level as defense-in-depth for static files and error pages
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+
+    # X-XSS-Protection is intentionally NOT included (deprecated, can cause vulnerabilities)
+    # Rails 7.1+ disables it by default. Use Content-Security-Policy instead.
+
+    # Client upload size (default 10MB)
+    # Increase for specific endpoints if needed (e.g., location /uploads { client_max_body_size 100m; })
+    client_max_body_size 10m;
+
+    # Apply rate limiting to all requests
+    location / {
+        limit_req zone=${APP_NAME}_limit burst=20 nodelay;
+        try_files \\\$uri @passenger;
+    }
+
+    location @passenger {
+        passenger_enabled on;
+    }
+
     # Action Cable WebSocket support
     location /cable {
         passenger_app_group_name ${APP_NAME}_websocket;
         passenger_force_max_concurrent_requests_per_process 0;
     }
 
-    # Client upload size
-    client_max_body_size 100m;
-
-    # Assets and static files
+    # Assets and static files (no rate limiting for static assets)
     location ~ ^/(assets|packs) {
         gzip_static on;
         expires max;
         add_header Cache-Control public;
+        limit_req off;
     }
 
     # Error pages
