@@ -529,6 +529,15 @@ log_info "Enabling and starting Nginx..."
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
+# Disable default Nginx site for security
+log_info "Disabling default Nginx site..."
+if [ -L /etc/nginx/sites-enabled/default ]; then
+    sudo rm -f /etc/nginx/sites-enabled/default
+    log_success "Default Nginx site disabled"
+else
+    log_info "Default Nginx site already disabled"
+fi
+
 log_success "Passenger + Nginx configured and running"
 
 ################################################################################
