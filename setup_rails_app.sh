@@ -271,6 +271,73 @@ log_success "Placeholder index.html created for testing"
 log_info "You can now visit http://$DOMAIN to test the Nginx configuration"
 
 ################################################################################
+# Create Rails Credentials Production Key
+################################################################################
+
+log_info "Setting up Rails credentials production key..."
+
+# Create credentials directory
+CREDENTIALS_DIR="$APP_ROOT/shared/config/credentials"
+mkdir -p "$CREDENTIALS_DIR"
+
+PRODUCTION_KEY_FILE="$CREDENTIALS_DIR/production.key"
+
+# Check if key file already exists
+if [ -f "$PRODUCTION_KEY_FILE" ]; then
+    log_warning "Production key already exists at: $PRODUCTION_KEY_FILE"
+    read -p "Overwrite existing key? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Keeping existing production key"
+    else
+        log_info "Will overwrite existing key"
+        rm -f "$PRODUCTION_KEY_FILE"
+    fi
+fi
+
+# Prompt for production key if file doesn't exist or was removed
+if [ ! -f "$PRODUCTION_KEY_FILE" ]; then
+    echo ""
+    echo "==========================================================================="
+    echo -e "${YELLOW}Rails Credentials Production Key${NC}"
+    echo "==========================================================================="
+    echo ""
+    echo "Enter your Rails production.key content."
+    echo "This is the encryption key for your Rails credentials."
+    echo ""
+    echo "To generate a new key, run on your development machine:"
+    echo "  ${BLUE}EDITOR='echo' rails credentials:edit --environment production${NC}"
+    echo ""
+    echo "Or to use an existing key, paste it from:"
+    echo "  ${BLUE}config/credentials/production.key${NC}"
+    echo ""
+    echo -e "${YELLOW}IMPORTANT: Keep this key secret and store it securely!${NC}"
+    echo ""
+    read -p "Paste your production key (or press Enter to skip): " -r PRODUCTION_KEY
+    echo ""
+
+    if [ -z "$PRODUCTION_KEY" ]; then
+        log_warning "Production key not provided - you'll need to add it manually before deploying"
+        log_info "Create the file: $PRODUCTION_KEY_FILE"
+        log_info "Set permissions: chmod 600 $PRODUCTION_KEY_FILE"
+    else
+        # Write key to file
+        echo "$PRODUCTION_KEY" > "$PRODUCTION_KEY_FILE"
+
+        # Set secure permissions (owner read/write only)
+        chmod 600 "$PRODUCTION_KEY_FILE"
+
+        # Set proper ownership
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$PRODUCTION_KEY_FILE"
+
+        log_success "Production key saved to: $PRODUCTION_KEY_FILE"
+        log_success "File permissions set to 600 (owner read/write only)"
+    fi
+fi
+
+echo ""
+
+################################################################################
 # Create PostgreSQL Database
 ################################################################################
 
@@ -511,6 +578,7 @@ echo ""
 echo "What's Been Created:"
 echo "-------------------"
 echo "  - Application directory: $APP_ROOT"
+echo "  - Rails credentials: $CREDENTIALS_DIR/production.key $([ -f "$PRODUCTION_KEY_FILE" ] && echo "(✓ configured)" || echo "(⚠ needs manual setup)")"
 echo "  - PostgreSQL database: $DB_NAME (owned by $DEPLOY_USER)"
 echo "  - Nginx virtual host: $NGINX_CONFIG (enabled and active)"
 if [ "$REQUEST_SSL" = true ]; then
@@ -530,14 +598,27 @@ echo "1. Update your Capistrano configuration (config/deploy/$RAILS_ENV.rb):"
 echo "   ${BLUE}set :deploy_to, '$APP_ROOT'${NC}"
 echo "   ${BLUE}server '$DOMAIN', user: '$DEPLOY_USER', roles: %w{app db web}${NC}"
 echo ""
-echo "2. Configure database.yml for production (config/database.yml):"
+if [ ! -f "$PRODUCTION_KEY_FILE" ]; then
+    echo "2. ${YELLOW}⚠ Add production.key manually (REQUIRED before deploy):${NC}"
+    echo "   ${BLUE}echo 'YOUR_PRODUCTION_KEY' > $PRODUCTION_KEY_FILE${NC}"
+    echo "   ${BLUE}chmod 600 $PRODUCTION_KEY_FILE${NC}"
+    echo ""
+    echo "   Generate a new key on your development machine:"
+    echo "   ${BLUE}EDITOR='echo' rails credentials:edit --environment production${NC}"
+    echo ""
+    NEXT_STEP=3
+else
+    NEXT_STEP=2
+fi
+echo "$NEXT_STEP. Configure database.yml for production (config/database.yml):"
 echo "   ${BLUE}$RAILS_ENV:${NC}"
 echo "   ${BLUE}  adapter: postgresql${NC}"
 echo "   ${BLUE}  database: $DB_NAME${NC}"
 echo "   ${BLUE}  username: $DEPLOY_USER${NC}"
 echo "   ${BLUE}  host: localhost${NC}"
 echo ""
-echo "3. Configure Redis password in your app (if using Redis):"
+NEXT_STEP=$((NEXT_STEP + 1))
+echo "$NEXT_STEP. Configure Redis password in your app (if using Redis):"
 echo "   ${YELLOW}Retrieve your Redis password from your password manager${NC}"
 echo "   ${BLUE}Update config/cable.yml and sidekiq.yml with this password:${NC}"
 echo ""
@@ -552,7 +633,7 @@ echo "   ${BLUE}  :concurrency: 5${NC}"
 echo "   ${BLUE}  :queues:${NC}"
 echo "   ${BLUE}    - default${NC}"
 echo ""
-NEXT_STEP=4
+NEXT_STEP=$((NEXT_STEP + 1))
 
 if [ "$SETUP_SIDEKIQ" = true ]; then
     echo "$NEXT_STEP. Configure Capistrano to restart Sidekiq (Capfile):"
@@ -583,6 +664,8 @@ echo "  - Check Passenger status:   ${BLUE}sudo passenger-status${NC}"
 echo "  - Test Nginx config:        ${BLUE}sudo nginx -t${NC}"
 echo "  - Reload Nginx:             ${BLUE}sudo systemctl reload nginx${NC}"
 echo "  - Connect to database:      ${BLUE}psql -d $DB_NAME${NC}"
+echo "  - Check production key:     ${BLUE}cat $PRODUCTION_KEY_FILE${NC}"
+echo "  - Set production key:       ${BLUE}echo 'YOUR_KEY' > $PRODUCTION_KEY_FILE && chmod 600 $PRODUCTION_KEY_FILE${NC}"
 if [ "$REQUEST_SSL" = true ]; then
     echo "  - Check SSL certificate:    ${BLUE}sudo certbot certificates${NC}"
     echo "  - Renew SSL (if needed):    ${BLUE}sudo certbot renew${NC}"
