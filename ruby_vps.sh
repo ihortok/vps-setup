@@ -541,6 +541,70 @@ fi
 log_success "Passenger + Nginx configured and running"
 
 ################################################################################
+# Configure Deploy User Environment
+################################################################################
+
+log_info "Configuring deploy user environment..."
+
+PROFILE="/home/$DEPLOY_USER/.profile"
+BASHRC="/home/$DEPLOY_USER/.bashrc"
+
+# Ensure .profile exists
+if [ ! -f "$PROFILE" ]; then
+    log_info "Creating .profile..."
+    touch "$PROFILE"
+
+    # Add standard .profile content to source .bashrc
+    cat >> "$PROFILE" <<'EOF'
+# if running bash
+if [ -n "$BASH_VERSION" ]; then
+    # include .bashrc if it exists
+    if [ -f "$HOME/.bashrc" ]; then
+        . "$HOME/.bashrc"
+    fi
+fi
+EOF
+    log_success ".profile created with .bashrc sourcing"
+else
+    log_info ".profile already exists"
+
+    # Check if .profile already sources .bashrc
+    if ! grep -q "\.bashrc" "$PROFILE"; then
+        log_warning ".profile exists but doesn't source .bashrc"
+        log_info "Adding .bashrc sourcing to .profile..."
+        cat >> "$PROFILE" <<'EOF'
+
+# if running bash
+if [ -n "$BASH_VERSION" ]; then
+    # include .bashrc if it exists
+    if [ -f "$HOME/.bashrc" ]; then
+        . "$HOME/.bashrc"
+    fi
+fi
+EOF
+        log_success ".profile configured to source .bashrc"
+    else
+        log_info ".profile already sources .bashrc"
+    fi
+fi
+
+# Add RAILS_ENV to .profile if not already present
+if ! grep -q "export RAILS_ENV" "$PROFILE"; then
+    log_info "Adding RAILS_ENV to .profile..."
+    cat >> "$PROFILE" <<'EOF'
+
+# Set Rails environment for production server
+export RAILS_ENV="production"
+EOF
+    log_success "RAILS_ENV configured in .profile"
+else
+    log_info "RAILS_ENV already configured in .profile"
+fi
+
+log_success "Deploy user environment configured"
+log_info "RAILS_ENV will be available for all login shells and SSH sessions"
+
+################################################################################
 # Configure www-data for Application Access
 ################################################################################
 
@@ -936,6 +1000,12 @@ echo -e "${BLUE}Redis Auth:${NC}    Password configured (stored only in your pas
 echo -e "${BLUE}Redis Bind:${NC}    Localhost only (127.0.0.1)"
 echo -e "${BLUE}Redis Cmds:${NC}    Dangerous commands disabled (FLUSHDB, FLUSHALL, CONFIG)"
 echo ""
+echo "Environment Configuration:"
+echo "------------------------"
+echo -e "${BLUE}Deploy User:${NC}   $DEPLOY_USER"
+echo -e "${BLUE}RAILS_ENV:${NC}     production (configured in ~/.profile)"
+echo -e "${BLUE}www-data:${NC}      Added to deploy group for application access"
+echo ""
 echo "Next Steps:"
 echo "----------"
 echo "1. Ensure you have saved your Redis password in a secure password manager"
@@ -948,6 +1018,7 @@ echo "7. Configure your Rails apps to use Redis password in config/cable.yml and
 echo ""
 echo "Useful Commands:"
 echo "---------------"
+echo "  - Check RAILS_ENV:          echo \$RAILS_ENV (or: source ~/.profile && echo \$RAILS_ENV)"
 echo "  - Test Nginx config:        sudo nginx -t"
 echo "  - Reload Nginx:             sudo systemctl reload nginx"
 echo "  - Restart Nginx:            sudo systemctl restart nginx"
