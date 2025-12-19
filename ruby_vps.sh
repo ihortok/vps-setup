@@ -625,10 +625,11 @@ else
 fi
 
 # Set deploy home directory to group-traversable (but not world-traversable)
+# Group has execute-only (can traverse but not list contents)
 DEPLOY_HOME="/home/$DEPLOY_USER"
 log_info "Setting secure permissions on $DEPLOY_HOME..."
-chmod 750 "$DEPLOY_HOME"
-log_success "Deploy home directory secured (750: owner=rwx, group=rx, others=none)"
+chmod 710 "$DEPLOY_HOME"
+log_success "Deploy home directory secured (710: owner=rwx, group=x only, others=none)"
 
 log_success "www-data configured for application access"
 
@@ -643,6 +644,10 @@ if [ -d "$HOME/.ssh" ]; then
     chmod 700 "$HOME/.ssh"
     chmod 600 "$HOME/.ssh"/* 2>/dev/null || true
 fi
+
+# Ensure shell config files are owner-only (no group or other access)
+chmod 600 "$HOME/.bashrc" 2>/dev/null || true
+chmod 600 "$HOME/.profile" 2>/dev/null || true
 
 # Ensure rbenv directory has correct permissions
 chmod -R u+rwX,go-w "$RBENV_ROOT"

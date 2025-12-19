@@ -552,11 +552,29 @@ log_info "Setting app directory permissions..."
 
 # Set app directory ownership and permissions
 sudo chgrp -R deploy "$APP_ROOT"
-# User: read/write/execute, Group: read/execute (no write), Others: no access
-sudo chmod -R u+rwX,g+rX,o-rwx "$APP_ROOT"
+
+# Base permissions: User gets full access, Group gets execute-only (traverse but not list), Others get nothing
+# This prevents www-data from listing directory contents while still allowing traversal to known paths
+sudo chmod -R u+rwX,g-rw+X,o-rwx "$APP_ROOT"
+
+# Public directory needs group read+execute so Nginx can serve static files
+if [ -d "$APP_ROOT/current/public" ]; then
+    sudo chmod -R u+rwX,g+rX,o-rwx "$APP_ROOT/current/public"
+    log_success "Public directory set to group-readable for Nginx"
+fi
+
+# Shared directories that Passenger needs write access to (will be created by Capistrano)
+# These will be created during deployment, but we set permissions now for when they exist
+for shared_dir in log tmp pids; do
+    if [ -d "$APP_ROOT/shared/$shared_dir" ]; then
+        sudo chmod -R u+rwX,g+rwX,o-rwx "$APP_ROOT/shared/$shared_dir"
+        log_success "Shared $shared_dir directory set to group-writable for Passenger"
+    fi
+done
 
 log_success "App directory permissions configured"
-log_info "www-data can access via deploy group (configured in ruby_vps.sh)"
+log_info "www-data can traverse directories but cannot list contents (execute-only)"
+log_info "www-data can read/serve files from public/ directory only"
 
 ################################################################################
 # Summary and Next Steps
