@@ -1,0 +1,169 @@
+# VPS Setup Scripts for Ruby on Rails
+
+Production-ready bash scripts for setting up a secure Ubuntu 22.04 VPS to host Ruby on Rails applications with Nginx, Passenger, PostgreSQL, Redis, and Sidekiq.
+
+Built with assistance from [Claude](https://claude.ai) by Anthropic.
+
+## Scripts
+
+### `ruby_vps.sh`
+Initial VPS setup and hardening. Installs and configures:
+- Ruby (via rbenv)
+- Node.js and Yarn
+- PostgreSQL
+- Redis
+- Nginx with Passenger
+- Security hardening (SSH, firewall, automatic updates)
+
+**Usage:**
+```bash
+chmod +x ruby_vps.sh
+./ruby_vps.sh
+```
+
+### `setup_rails_app.sh`
+Configures individual Rails applications with proper permissions, Nginx virtual hosts, and optional Sidekiq background workers.
+
+**Usage:**
+```bash
+./setup_rails_app.sh --app-name myapp --domain myapp.example.com [--setup-sidekiq]
+```
+
+**Options:**
+- `--app-name NAME` - Application name (required)
+- `--domain DOMAIN` - Domain name (required)
+- `--setup-sidekiq` - Configure Sidekiq systemd service (optional)
+
+## Security Features
+
+- **Execute-only directory permissions (710)** - Prevents directory enumeration while allowing traversal
+- **SSH hardening** - Root login disabled, password authentication disabled, key-only access
+- **PostgreSQL peer authentication** - No passwords in config files, OS-level authentication
+- **Redis security** - Localhost-only binding, dangerous commands disabled, password authentication
+- **Nginx security headers** - X-Frame-Options, X-Content-Type-Options, Referrer-Policy, etc.
+- **Rate limiting** - 10 requests/second per IP with burst allowance
+- **Automatic security updates** - Unattended-upgrades configured
+- **SSL/TLS ready** - Prepared for Let's Encrypt with Certbot
+
+## Directory Structure
+
+```
+/home/deploy/
+├── .rbenv/              # Ruby version manager
+├── .ssh/                # SSH keys (700)
+├── .bashrc              # Shell config (600)
+├── .profile             # Shell config (600)
+└── apps/
+    └── myapp/
+        ├── current      -> releases/[timestamp]
+        ├── releases/    # Capistrano releases
+        ├── repo/        # Git repository
+        └── shared/      # Persistent files (710)
+            ├── config/
+            │   └── credentials/
+            │       └── production.key (600)
+            ├── log/
+            ├── tmp/
+            └── public/
+```
+
+## File Permissions Strategy
+
+The scripts implement **execute-only group permissions** for enhanced security:
+
+- **710 on directories** - Owner has full access, group can traverse but not list contents, no world access
+- **600 on sensitive files** - Owner-only access for credentials, shell configs
+- **www-data in deploy group** - Nginx/Passenger can access app files via group membership
+
+This prevents directory enumeration attacks while allowing legitimate access to known paths.
+
+## Capistrano Integration
+
+Configure `config/deploy.rb`:
+```ruby
+set :application, "myapp"
+set :repo_url, "git@github.com:username/myapp.git"
+set :deploy_to, "/home/deploy/apps/myapp"
+
+# Sidekiq (if using)
+set :init_system, :systemd
+set :sidekiq_service_unit_name, "sidekiq-myapp"
+set :sidekiq_role, :app
+```
+
+Add to `Capfile`:
+```ruby
+require "capistrano/rbenv"
+require "capistrano/rails"
+require "capistrano/passenger"
+require "capistrano/sidekiq"  # if using Sidekiq
+```
+
+## Requirements
+
+- Ubuntu 22.04 LTS
+- Root or sudo access
+- SSH key-based authentication recommended
+
+## Post-Setup
+
+After running the scripts, complete these manual steps:
+
+1. **Point your domain to the server** (update DNS A record to server IP)
+
+2. **Setup SSL with Let's Encrypt** (Certbot is already installed):
+   ```bash
+   sudo certbot --nginx -d yourdomain.com
+   ```
+
+3. **Configure deploy user sudoers** (for Sidekiq management via Capistrano):
+   ```bash
+   echo 'deploy ALL=(ALL) NOPASSWD: /bin/systemctl start sidekiq-*, /bin/systemctl stop sidekiq-*, /bin/systemctl restart sidekiq-*, /bin/systemctl reload sidekiq-*, /bin/systemctl status sidekiq-*' | sudo tee /etc/sudoers.d/deploy-sidekiq
+   sudo chmod 440 /etc/sudoers.d/deploy-sidekiq
+   ```
+
+**Note:** The firewall (UFW) is already enabled by `ruby_vps.sh`, and the credentials directory is created by `setup_rails_app.sh` (you'll be prompted for the key during setup).
+
+## Security Audit
+
+Run a security audit on your VPS:
+```bash
+ssh deploy@your-server
+
+# Check file permissions
+ls -la /home/deploy/
+ls -la /home/deploy/apps/myapp/
+
+# Check services
+systemctl status nginx passenger redis-server postgresql
+systemctl status sidekiq-myapp  # if using Sidekiq
+
+# Check network bindings (PostgreSQL and Redis should be localhost-only)
+ss -tlnp | grep -E "(5432|6379)"
+
+# Check firewall
+sudo ufw status verbose
+```
+
+## Common Issues
+
+**Sidekiq not starting after deployment:**
+- Ensure deploy user has limited sudo for systemctl (see Post-Setup #1)
+- Check logs: `journalctl -u sidekiq-myapp -n 50`
+
+**Permission denied errors:**
+- Verify www-data is in deploy group: `groups www-data`
+- Check directory permissions are 710 (execute-only for group)
+
+**Nginx 502 Bad Gateway:**
+- Check Passenger is running: `sudo passenger-status`
+- Verify Ruby path in Nginx config matches rbenv shims
+- Check application logs in `shared/log/production.log`
+
+## License
+
+MIT
+
+## Credits
+
+These scripts were developed with assistance from Claude (Anthropic's AI assistant) to implement security best practices and modern deployment patterns for Ruby on Rails applications.
