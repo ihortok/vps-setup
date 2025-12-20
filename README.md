@@ -4,6 +4,8 @@ Production-ready bash scripts for setting up a secure Ubuntu 22.04 VPS to host R
 
 Built with assistance from [Claude](https://claude.ai) by Anthropic.
 
+**📖 [Operations Guide](OPERATIONS.md)** - Quick reference for managing your VPS (fail2ban, Nginx logs, troubleshooting)
+
 ## Scripts
 
 ### `ruby_vps.sh`
