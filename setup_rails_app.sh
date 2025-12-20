@@ -371,7 +371,6 @@ sudo tee "$NGINX_CONFIG" > /dev/null <<EOF
 
 # Rate limiting zone (10 req/sec per IP, with burst allowance)
 limit_req_zone \\\$binary_remote_addr zone=${APP_NAME}_limit:10m rate=10r/s;
-limit_req_status 429;
 
 server {
     listen 80;

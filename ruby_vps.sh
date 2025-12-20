@@ -538,6 +538,17 @@ else
     log_info "Default Nginx site already disabled"
 fi
 
+# Configure global rate limiting directive
+log_info "Configuring global rate limiting settings..."
+NGINX_CONF="/etc/nginx/nginx.conf"
+if ! sudo grep -q "limit_req_status" "$NGINX_CONF"; then
+    # Add limit_req_status to http block (after the opening http {)
+    sudo sed -i '/^http {/a \    # Global rate limiting status code (429 = Too Many Requests)\n    limit_req_status 429;' "$NGINX_CONF"
+    log_success "Global rate limiting configured (HTTP 429 for rate-limited requests)"
+else
+    log_info "Global rate limiting already configured"
+fi
+
 log_success "Passenger + Nginx configured and running"
 
 ################################################################################
