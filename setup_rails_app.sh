@@ -369,8 +369,9 @@ sudo tee "$NGINX_CONFIG" > /dev/null <<EOF
 # Nginx + Passenger configuration for $APP_NAME
 # Domain: $DOMAIN
 
-# Rate limiting zone (10 req/sec per IP, with burst allowance)
-limit_req_zone \\\$binary_remote_addr zone=${APP_NAME}_limit:10m rate=10r/s;
+# Rate limiting zone (50 req/sec per IP, with burst allowance)
+# Note: This allows pages with many images to load without hitting rate limits
+limit_req_zone \\\$binary_remote_addr zone=${APP_NAME}_limit:10m rate=50r/s;
 
 server {
     listen 80;
@@ -400,9 +401,10 @@ server {
     # Increase for specific endpoints if needed (e.g., location /uploads { client_max_body_size 100m; })
     client_max_body_size 10m;
 
-    # Apply rate limiting to all requests
+    # Apply rate limiting to dynamic requests
+    # burst=100 allows pages with many images/assets to load without triggering rate limits
     location / {
-        limit_req zone=${APP_NAME}_limit burst=20 nodelay;
+        limit_req zone=${APP_NAME}_limit burst=100 nodelay;
         try_files \\\$uri @passenger;
     }
 
@@ -414,6 +416,11 @@ server {
     location /cable {
         passenger_app_group_name ${APP_NAME}_websocket;
         passenger_force_max_concurrent_requests_per_process 0;
+    }
+
+    # Active Storage - no rate limiting (users downloading their own uploaded files)
+    location /rails/active_storage {
+        try_files \\\$uri @passenger;
     }
 
     # Assets and static files (no rate limiting for static assets)
