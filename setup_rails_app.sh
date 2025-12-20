@@ -422,7 +422,6 @@ server {
         gzip_static on;
         expires max;
         add_header Cache-Control public;
-        limit_req off;
     }
 
     # Error pages
