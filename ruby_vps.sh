@@ -660,8 +660,21 @@ fi
 chmod 600 "$HOME/.bashrc" 2>/dev/null || true
 chmod 600 "$HOME/.profile" 2>/dev/null || true
 
-# Ensure rbenv directory has correct permissions
-chmod -R u+rwX,go-w "$RBENV_ROOT"
+# Ensure rbenv directory has secure permissions (750 = owner full, group read/execute, no world access)
+chmod -R u+rwX,g+rX,g-w,o-rwx "$RBENV_ROOT"
+
+# Secure common development tool directories (prevent world-readable)
+for dir in .bundle .local .yarn .cache .npm .gem; do
+    if [ -d "$HOME/$dir" ]; then
+        chmod -R u+rwX,g-rwx,o-rwx "$HOME/$dir" 2>/dev/null || true
+    fi
+done
+
+# Create apps directory with secure permissions
+log_info "Creating apps directory structure..."
+mkdir -p "$HOME/apps"
+chmod 750 "$HOME/apps"
+log_success "Apps directory created with secure permissions (750)"
 
 log_success "File permissions configured"
 
@@ -982,6 +995,39 @@ sudo apt-get autoremove -y -qq
 sudo apt-get clean -qq
 
 log_success "Cleanup completed"
+
+################################################################################
+# Final Security Permissions Audit
+################################################################################
+
+log_info "Performing final security permissions audit..."
+
+# Fix any directories that may have been created with incorrect permissions during installation
+for dir in .bundle .local .yarn .cache .npm .gem .config; do
+    if [ -d "$HOME/$dir" ]; then
+        chmod -R u+rwX,g-rwx,o-rwx "$HOME/$dir" 2>/dev/null || true
+    fi
+done
+
+# Fix Passenger directory if it exists (sometimes created during Passenger installation)
+if [ -d "$HOME/.passenger" ]; then
+    chmod 750 "$HOME/.passenger"
+    log_info "Secured .passenger directory (750)"
+fi
+
+# Ensure apps directory has correct permissions
+if [ -d "$HOME/apps" ]; then
+    chmod 750 "$HOME/apps"
+fi
+
+# Re-verify critical security permissions
+chmod 710 "$HOME" 2>/dev/null || true
+chmod 700 "$HOME/.ssh" 2>/dev/null || true
+chmod 600 "$HOME/.ssh"/* 2>/dev/null || true
+chmod 600 "$HOME/.bashrc" 2>/dev/null || true
+chmod 600 "$HOME/.profile" 2>/dev/null || true
+
+log_success "Final security permissions audit completed"
 
 ################################################################################
 # Installation Summary

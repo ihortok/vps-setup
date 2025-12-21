@@ -213,8 +213,17 @@ fi
 
 log_info "Creating application directory..."
 
+# Ensure parent apps directory exists with correct permissions
+APPS_DIR="/home/$DEPLOY_USER/apps"
+if [ ! -d "$APPS_DIR" ]; then
+    mkdir -p "$APPS_DIR"
+    chmod 750 "$APPS_DIR"
+    log_info "Created apps directory with secure permissions (750)"
+fi
+
 # Create app directory
 mkdir -p "$APP_ROOT"
+chmod 750 "$APP_ROOT"
 
 log_success "Application directory created: $APP_ROOT"
 

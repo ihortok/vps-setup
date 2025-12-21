@@ -640,8 +640,230 @@ sudo passenger-config restart-app /home/deploy/apps/yourapp/current
 
 ---
 
+## File Permissions Security
+
+### Expected Permissions Reference
+
+```bash
+# Critical security permissions
+/home/deploy                        710  drwx--x---  (group can traverse but not list)
+/home/deploy/.ssh                   700  drwx------  (owner-only access)
+/home/deploy/.ssh/authorized_keys   600  -rw-------  (owner read/write only)
+/home/deploy/.ssh/id_*              600  -rw-------  (private keys owner-only)
+/home/deploy/.bashrc                600  -rw-------  (owner-only)
+/home/deploy/.profile               600  -rw-------  (owner-only)
+/home/deploy/.bash_history          600  -rw-------  (owner-only)
+
+# Application directories
+/home/deploy/apps                   750  drwxr-x---  (group can traverse)
+/home/deploy/apps/myapp             750  drwxr-x---  (group can traverse)
+/home/deploy/apps/myapp/current     750  drwxr-x---  (group can traverse)
+/home/deploy/apps/myapp/current/public
+                                    755  drwxr-xr-x  (Nginx needs read access)
+
+# Shared directories (Passenger write access)
+/home/deploy/apps/myapp/shared/log  770  drwxrwx---  (group writable)
+/home/deploy/apps/myapp/shared/tmp  770  drwxrwx---  (group writable)
+/home/deploy/apps/myapp/shared/pids 770  drwxrwx---  (group writable)
+
+# Credential files
+*.key files                         600  -rw-------  (owner-only)
+.env files                          600  -rw-------  (owner-only)
+master.key                          600  -rw-------  (owner-only)
+production.key                      600  -rw-------  (owner-only)
+
+# Development tool directories
+/home/deploy/.bundle                700  drwx------  (owner-only)
+/home/deploy/.local                 700  drwx------  (owner-only)
+/home/deploy/.yarn                  700  drwx------  (owner-only)
+/home/deploy/.rbenv                 750  drwxr-x---  (group read-only)
+/home/deploy/.passenger             750  drwxr-x---  (NOT 777!)
+```
+
+### Check Current Permissions
+
+```bash
+# Quick permission check for critical files
+stat -c "%a %U:%G %n" /home/deploy
+stat -c "%a %U:%G %n" /home/deploy/.ssh
+stat -c "%a %U:%G %n" /home/deploy/.ssh/authorized_keys
+
+# Check all important directories
+for dir in /home/deploy /home/deploy/.ssh /home/deploy/apps; do
+    ls -ld "$dir"
+done
+
+# Check for world-writable files (security risk)
+find /home/deploy -type f -perm -002 2>/dev/null
+
+# Check for world-readable credential files (security risk)
+find /home/deploy/apps -name "*.key" -o -name ".env*" | xargs ls -l 2>/dev/null
+
+# Verify www-data group membership
+groups www-data | grep deploy && echo "✓ www-data in deploy group" || echo "✗ Missing"
+```
+
+### Fix Incorrect Permissions
+
+```bash
+# Run the automated fix script
+bash /home/deploy/vps-setup/fix_permissions.sh
+
+# Or fix manually:
+
+# Fix critical home directory (710 = owner full, group execute-only, no world)
+chmod 710 /home/deploy
+
+# Fix SSH directory and files
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/*
+
+# Fix shell configs
+chmod 600 /home/deploy/.bashrc
+chmod 600 /home/deploy/.profile
+
+# Fix CRITICAL security issue: .passenger directory
+# (Sometimes created with 777 = world-writable!)
+chmod 750 /home/deploy/.passenger
+
+# Fix apps directory
+chmod 750 /home/deploy/apps
+
+# Fix specific app permissions
+APP_NAME="myapp"
+chmod 750 /home/deploy/apps/$APP_NAME
+chmod -R u+rwX,g+rX,o-rwx /home/deploy/apps/$APP_NAME/current/public
+chmod -R u+rwX,g+rwX,o-rwx /home/deploy/apps/$APP_NAME/shared/log
+chmod -R u+rwX,g+rwX,o-rwx /home/deploy/apps/$APP_NAME/shared/tmp
+
+# Fix credential files (CRITICAL - must be owner-only)
+find /home/deploy/apps -name "*.key" -exec chmod 600 {} \;
+find /home/deploy/apps -name ".env*" -exec chmod 600 {} \;
+
+# Fix development tool directories
+for dir in .bundle .local .yarn .cache .npm .gem; do
+    [ -d "/home/deploy/$dir" ] && chmod -R u+rwX,g-rwx,o-rwx "/home/deploy/$dir"
+done
+```
+
+### Common Permission Issues
+
+#### Issue: Nginx returns 403 Forbidden
+
+**Cause:** Incorrect permissions on home or public directory
+
+**Fix:**
+```bash
+# Ensure group can traverse (execute-only) home directory
+chmod 710 /home/deploy
+
+# Ensure public directory is group-readable
+chmod -R u+rwX,g+rX,o-rwx /home/deploy/apps/myapp/current/public
+
+# Restart Nginx
+sudo systemctl restart nginx
+```
+
+#### Issue: Passenger can't write to log files
+
+**Cause:** Shared directories not group-writable
+
+**Fix:**
+```bash
+# Make shared directories group-writable
+chmod -R u+rwX,g+rwX,o-rwx /home/deploy/apps/myapp/shared/log
+chmod -R u+rwX,g+rwX,o-rwx /home/deploy/apps/myapp/shared/tmp
+
+# Restart app
+sudo passenger-config restart-app /home/deploy/apps/myapp
+```
+
+#### Issue: Rails can't decrypt credentials
+
+**Cause:** Incorrect permissions on production.key
+
+**Fix:**
+```bash
+# Find and fix credential files
+find /home/deploy/apps -name "*.key" -exec chmod 600 {} \;
+find /home/deploy/apps -name "master.key" -exec chmod 600 {} \;
+
+# Verify
+ls -l /home/deploy/apps/myapp/shared/config/credentials/production.key
+# Should show: -rw------- 1 deploy deploy
+```
+
+#### Issue: Security warning about world-writable files
+
+**Cause:** Files with 777 or similar overly permissive settings
+
+**Fix:**
+```bash
+# Find world-writable files
+find /home/deploy -type f -perm -002
+
+# Fix specific file
+chmod 600 /path/to/file
+
+# Fix entire directory tree (be careful!)
+chmod -R u+rwX,g-w,o-rwx /home/deploy/apps/myapp
+```
+
+### Permission Bits Explanation
+
+```
+Permission bits: rwxrwxrwx = 777
+                 ││││││└└└─ Others: read, write, execute
+                 │││└└└──── Group: read, write, execute
+                 └└└─────── Owner: read, write, execute
+
+Common values:
+  700 = rwx------ = Owner full, no group/others
+  750 = rwxr-x--- = Owner full, group read+execute
+  755 = rwxr-xr-x = Owner full, group+others read+execute
+  600 = rw------- = Owner read+write only
+  644 = rw-r--r-- = Owner read+write, group+others read
+  710 = rwx--x--- = Owner full, group execute-only (can traverse but not list)
+  770 = rwxrwx--- = Owner+group full, no others
+```
+
+### Security Best Practices
+
+1. **Principle of Least Privilege**
+   - Only grant minimum permissions needed
+   - No world-readable files in home directory
+   - Credential files must be 600 (owner-only)
+
+2. **Group-Based Access for Nginx/Passenger**
+   - www-data must be in deploy group
+   - Home directory: 710 (group can traverse but not list)
+   - Public directory: group-readable
+   - Log/tmp directories: group-writable
+
+3. **Regular Audits**
+   ```bash
+   # Run weekly
+   bash /home/deploy/vps-setup/fix_permissions.sh
+
+   # Check for security issues
+   find /home/deploy -type f -perm -002  # World-writable
+   find /home/deploy -type f -perm -004  # World-readable
+   ```
+
+4. **After Deployment**
+   ```bash
+   # Capistrano may create files with incorrect permissions
+   # Run after each deploy:
+   chmod -R u+rwX,g+rX,o-rwx /home/deploy/apps/myapp/current/public
+   chmod -R u+rwX,g+rwX,o-rwx /home/deploy/apps/myapp/shared/log
+   chmod 600 /home/deploy/apps/myapp/shared/config/credentials/*.key
+   ```
+
+---
+
 ## Additional Resources
 
 - [Nginx Documentation](https://nginx.org/en/docs/)
 - [fail2ban Wiki](https://github.com/fail2ban/fail2ban/wiki)
 - [Passenger Documentation](https://www.phusionpassenger.com/docs/)
+- [Linux File Permissions](https://wiki.archlinux.org/title/File_permissions_and_attributes)

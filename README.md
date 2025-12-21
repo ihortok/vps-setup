@@ -16,6 +16,7 @@ Initial VPS setup and hardening. Installs and configures:
 - Redis
 - Nginx with Passenger
 - Security hardening (SSH, firewall, automatic updates)
+- Secure file permissions
 
 **Usage:**
 ```bash
@@ -28,13 +29,39 @@ Configures individual Rails applications with proper permissions, Nginx virtual 
 
 **Usage:**
 ```bash
-./setup_rails_app.sh --app-name myapp --domain myapp.example.com [--setup-sidekiq]
+./setup_rails_app.sh APP_NAME DOMAIN [OPTIONS]
 ```
 
+**Arguments:**
+- `APP_NAME` - Application name (e.g., "myapp")
+- `DOMAIN` - Domain or subdomain (e.g., "myapp.example.com")
+
 **Options:**
-- `--app-name NAME` - Application name (required)
-- `--domain DOMAIN` - Domain name (required)
-- `--setup-sidekiq` - Configure Sidekiq systemd service (optional)
+- `--db-name NAME` - Database name (default: APP_NAME_production)
+- `--rails-env ENV` - Rails environment (default: production)
+- `--request-ssl` - Request SSL certificate via Certbot
+- `--setup-sidekiq` - Configure Sidekiq systemd service
+
+**Example:**
+```bash
+./setup_rails_app.sh myapp myapp.example.com --request-ssl --setup-sidekiq
+```
+
+### `fix_permissions.sh`
+Security audit and fix tool for existing installations. Corrects file permissions to prevent security vulnerabilities.
+
+**Usage:**
+```bash
+bash fix_permissions.sh
+```
+
+**What it fixes:**
+- Critical: `.passenger/` directory (fixes world-writable 777 → 750)
+- Home directory permissions (710)
+- SSH keys and configs (700/600)
+- Application directories (750)
+- Credential files (600)
+- Development tool directories (700)
 
 ## Security Features
 
