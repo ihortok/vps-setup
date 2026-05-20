@@ -337,29 +337,59 @@ fi
 # Install Redis
 ################################################################################
 
-log_info "Installing Redis..."
+log_info "Installing Redis (from official redis.io APT repo; Sidekiq 8 requires Redis >= 7.2)..."
 
-if command_exists redis-server; then
-    CURRENT_REDIS_VERSION=$(redis-server --version)
-    log_info "Redis already installed: $CURRENT_REDIS_VERSION"
-else
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends redis-server
+# Add the official Redis APT repository (one-time setup; re-runs skip this block)
+if [ ! -f /etc/apt/sources.list.d/redis.list ]; then
+    log_info "Adding official Redis APT repository..."
 
-    # Configure Redis to start on boot
-    sudo systemctl enable redis-server
-    sudo systemctl start redis-server
+    # Prerequisites for fetching the GPG key and reading the release codename
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+        curl gpg lsb-release
 
-    INSTALLED_REDIS_VERSION=$(redis-server --version)
-    log_success "Redis installed: $INSTALLED_REDIS_VERSION"
+    # Import the Redis signing key (overwriting any prior copy is fine)
+    curl -fsSL https://packages.redis.io/gpg | \
+        sudo gpg --dearmor --yes -o /usr/share/keyrings/redis-archive-keyring.gpg
+    sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+
+    # Register the repo
+    echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | \
+        sudo tee /etc/apt/sources.list.d/redis.list >/dev/null
+
+    sudo apt-get update -qq
 fi
 
-# Configure Redis password for security
-REDIS_CONF="/etc/redis/redis.conf"
+# Install redis-server. `--force-confold` makes any future package upgrade
+# preserve the ACL line we append below, deterministically across dpkg versions.
+log_info "Installing redis-server..."
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    -o Dpkg::Options::="--force-confold" redis-server
 
-if sudo grep -q "^requirepass" "$REDIS_CONF"; then
-    log_info "Redis password already configured"
+# systemctl enable/start are idempotent (no-ops if already in state)
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
+
+INSTALLED_REDIS_VERSION=$(redis-server --version)
+log_success "Redis installed: $INSTALLED_REDIS_VERSION"
+
+# Configure Redis security (ACL-based; Redis 8 compatible)
+REDIS_CONF="/etc/redis/redis.conf"
+NEEDS_REDIS_RESTART=false
+
+# Bind to localhost only. Redis 8's default already is localhost-only
+# (`bind 127.0.0.1 -::1`), so the grep guard skips this on a fresh install.
+# The block exists so a re-run still enforces localhost binding if the
+# default ever changes upstream.
+if ! sudo grep -q "^bind 127.0.0.1" "$REDIS_CONF"; then
+    sudo sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$REDIS_CONF"
+    NEEDS_REDIS_RESTART=true
+fi
+
+# Configure ACL: password + command restrictions for the default user.
+if sudo grep -qE '^user default on ' "$REDIS_CONF"; then
+    log_info "Redis ACL already configured"
 else
-    log_info "Configuring Redis password for security..."
+    log_info "Configuring Redis authentication and command restrictions..."
 
     echo ""
     echo "==========================================================================="
@@ -374,7 +404,7 @@ else
     echo ""
 
     if [ "$PASSWORD_CHOICE" = "1" ]; then
-        # Generate a secure random password
+        # Generate a secure random password (base64 -> only [A-Za-z0-9+/=], no whitespace)
         REDIS_PASSWORD=$(openssl rand -base64 32)
 
         echo -e "${GREEN}Generated secure password:${NC}"
@@ -384,7 +414,7 @@ else
         echo "└────────────────────────────────────────────────────────┘"
         echo ""
         echo -e "${RED}⚠️  IMPORTANT: Copy this password NOW to your password manager!${NC}"
-        echo -e "${RED}⚠️  It will NOT be saved to disk for security reasons.${NC}"
+        echo -e "${RED}⚠️  It will be written to /etc/redis/redis.conf only.${NC}"
         echo ""
         read -p "Press ENTER after you have saved the password..." -r
         echo ""
@@ -401,7 +431,7 @@ else
 
     elif [ "$PASSWORD_CHOICE" = "2" ]; then
         # User provides their own password
-        echo "Enter your Redis password (minimum 16 characters):"
+        echo "Enter your Redis password (minimum 16 characters, no whitespace):"
         read -s -r REDIS_PASSWORD
         echo ""
         echo "Confirm password:"
@@ -418,6 +448,14 @@ else
             exit 1
         fi
 
+        # ACL parsing reads the password up to whitespace; reject whitespace early.
+        case "$REDIS_PASSWORD" in
+            *[[:space:]]*)
+                log_error "Password must not contain whitespace. Please re-run the script."
+                exit 1
+                ;;
+        esac
+
         log_success "Password accepted"
 
     else
@@ -425,31 +463,34 @@ else
         exit 1
     fi
 
-    # Bind Redis to localhost only (prevent network access)
-    if ! sudo grep -q "^bind 127.0.0.1" "$REDIS_CONF"; then
-        sudo sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$REDIS_CONF"
-    fi
+    # ACL line: authentication + command restrictions in one directive.
+    # `user default on >PASS ~* &* +@all -CMD...` means:
+    #   on            - account enabled
+    #   >PASS         - sets the password
+    #   ~*            - all keys accessible
+    #   &*            - all pub/sub channels accessible
+    #   +@all -CMD... - all commands allowed except the listed dangerous ones
+    # Bundled modules (Search, ReJSON, Bloom, TimeSeries, VectorSet) call
+    # CONFIG via RM_Call internally during init, which bypasses ACL checks,
+    # so they keep working while external clients are restricted.
+    echo "user default on >$REDIS_PASSWORD ~* &* +@all -CONFIG -FLUSHDB -FLUSHALL -DEBUG -SHUTDOWN -KEYS" | \
+        sudo tee -a "$REDIS_CONF" >/dev/null
 
-    # Add password to Redis configuration
-    echo "requirepass $REDIS_PASSWORD" | sudo tee -a "$REDIS_CONF" >/dev/null
-
-    # Disable dangerous commands
-    echo "rename-command FLUSHDB \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
-    echo "rename-command FLUSHALL \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
-    echo "rename-command CONFIG \"\"" | sudo tee -a "$REDIS_CONF" >/dev/null
-
-    # Restart Redis to apply changes
-    sudo systemctl restart redis-server
+    NEEDS_REDIS_RESTART=true
 
     # Clear password from memory
     unset REDIS_PASSWORD
     unset REDIS_PASSWORD_CONFIRM
     unset CONFIRM_PASSWORD
 
-    log_success "Redis password configured and saved to /etc/redis/redis.conf"
-    log_info "Redis is now bound to localhost only"
-    log_info "Dangerous commands (FLUSHDB, FLUSHALL, CONFIG) disabled"
+    log_success "Redis ACL configured in /etc/redis/redis.conf"
+    log_info "Redis bound to localhost; default user requires password"
+    log_info "CONFIG/FLUSHDB/FLUSHALL/DEBUG/SHUTDOWN/KEYS denied for external clients"
     log_warning "Store your Redis password securely in your password manager"
+fi
+
+if [ "$NEEDS_REDIS_RESTART" = "true" ]; then
+    sudo systemctl restart redis-server
 fi
 
 log_success "Redis configured and running"
