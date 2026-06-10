@@ -147,7 +147,15 @@ echo ""
 
 echo -e "${BLUE}▶ Redis Configuration${NC}"
 if sudo test -f /etc/redis/redis.conf; then
-    sudo stat -c "   %n - %a (%U:%G)" /etc/redis/redis.conf
+    redis_perms=$(sudo stat -c "%a" /etc/redis/redis.conf)
+    redis_owner=$(sudo stat -c "%U:%G" /etc/redis/redis.conf)
+    echo "   /etc/redis/redis.conf - $redis_perms ($redis_owner)"
+    if [ "$redis_perms" = "640" ] && [ "$redis_owner" = "root:redis" ]; then
+        echo -e "   Status: ${GREEN}✓ Correct (640 root:redis — password not world-readable)${NC}"
+    else
+        echo -e "   Status: ${YELLOW}⚠ Expected: 640 root:redis, Got: $redis_perms $redis_owner${NC}"
+        echo -e "   ${YELLOW}Fix: sudo chmod 640 /etc/redis/redis.conf && sudo chown root:redis /etc/redis/redis.conf${NC}"
+    fi
 fi
 echo ""
 
@@ -207,7 +215,7 @@ echo ""
 echo "10. FILES WITH PASSWORDS/SECRETS (Pattern Search)"
 echo "----------------------------------------"
 echo "Searching for potential secrets in filenames..."
-secret_files=$(find /home/deploy/apps -type f -name "*secret*" -o -name "*password*" -o -name "*.key" -o -name ".env*" 2>/dev/null | head -20)
+secret_files=$(find /home/deploy/apps -type f \( -name "*secret*" -o -name "*password*" -o -name "*.key" -o -name ".env*" \) 2>/dev/null | head -20)
 if [ -n "$secret_files" ]; then
     echo -e "${YELLOW}Found files that may contain secrets (check their permissions):${NC}"
     while IFS= read -r file; do
@@ -236,7 +244,7 @@ echo "  - /home/deploy/.ssh:                      700 (drwx------)"
 echo "  - /home/deploy/.ssh/authorized_keys:      600 (-rw-------)"
 echo "  - /home/deploy/.bashrc, .profile:         600 (-rw-------)"
 echo "  - Application directories:                750 (drwxr-x---)"
-echo "  - Application public/ directories:        755 (drwxr-xr-x)"
+echo "  - Application public/ directories:        750 (drwxr-x---)"
 echo "  - Application shared/log, shared/tmp:     770 (drwxrwx---)"
 echo "  - Rails credentials files (*.key):        600 (-rw-------)"
 echo "  - Database config files:                  600 (-rw-------)"

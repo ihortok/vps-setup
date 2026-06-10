@@ -193,6 +193,19 @@ else
     log_info "Run: sudo usermod -a -G deploy www-data && sudo systemctl restart nginx"
 fi
 
+# Fix redis.conf permissions (contains plaintext password — must not be world-readable)
+if sudo test -f /etc/redis/redis.conf; then
+    redis_perms=$(sudo stat -c "%a" /etc/redis/redis.conf)
+    redis_owner=$(sudo stat -c "%U:%G" /etc/redis/redis.conf)
+    if [ "$redis_perms" != "640" ] || [ "$redis_owner" != "root:redis" ]; then
+        sudo chmod 640 /etc/redis/redis.conf
+        sudo chown root:redis /etc/redis/redis.conf
+        log_success "Fixed redis.conf permissions: $redis_perms $redis_owner → 640 root:redis"
+    else
+        log_info "Already correct: redis.conf (640 root:redis)"
+    fi
+fi
+
 echo ""
 echo "========================================================================"
 echo "Summary"
