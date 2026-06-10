@@ -128,6 +128,13 @@ require "capistrano/passenger"
 require "capistrano/sidekiq"  # if using Sidekiq
 ```
 
+## Password Requirements
+
+| Password | Minimum | Why |
+|---|---|---|
+| `deploy` sudo password | 20 characters | Used only at a local/console `sudo` prompt — SSH password login is disabled. Store in a password manager. Generate with `openssl rand -base64 20`. |
+| Redis `AUTH` password | 32 characters | Redis processes millions of `AUTH` commands per second locally; short passwords are brute-forceable from a compromised process. The script auto-generates `openssl rand -base64 32` (44 chars) — use that unless you have a reason to supply your own. Avoid whitespace and shell-special characters (`"`, `'`, `$`, `` ` ``). |
+
 ## Requirements
 
 - Ubuntu 24.04 LTS

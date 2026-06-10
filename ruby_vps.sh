@@ -435,7 +435,7 @@ else
 
     elif [ "$PASSWORD_CHOICE" = "2" ]; then
         # User provides their own password
-        echo "Enter your Redis password (minimum 16 characters, no whitespace):"
+        echo "Enter your Redis password (minimum 32 characters, no whitespace):"
         read -s -r REDIS_PASSWORD
         echo ""
         echo "Confirm password:"
@@ -447,8 +447,8 @@ else
             exit 1
         fi
 
-        if [ ${#REDIS_PASSWORD} -lt 16 ]; then
-            log_error "Password too short (minimum 16 characters). Please re-run the script."
+        if [ ${#REDIS_PASSWORD} -lt 32 ]; then
+            log_error "Password too short (minimum 32 characters). Please re-run the script."
             exit 1
         fi
 
