@@ -1,6 +1,6 @@
 # VPS Setup Scripts for Ruby on Rails
 
-Production-ready bash scripts for setting up a secure Ubuntu 22.04 VPS to host Ruby on Rails applications with Nginx, Passenger, PostgreSQL, Redis, and Sidekiq.
+Production-ready bash scripts for setting up a secure Ubuntu 24.04 VPS to host Ruby on Rails applications with Nginx, Passenger, PostgreSQL, Redis, and Sidekiq.
 
 Built with assistance from [Claude](https://claude.ai) by Anthropic.
 
@@ -130,7 +130,7 @@ require "capistrano/sidekiq"  # if using Sidekiq
 
 ## Requirements
 
-- Ubuntu 22.04 LTS
+- Ubuntu 24.04 LTS
 - Root or sudo access
 - SSH key-based authentication recommended
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A small set of bash scripts that provision and harden an Ubuntu 22.04 VPS for hosting Ruby on Rails apps behind Nginx + Phusion Passenger, with PostgreSQL, Redis, and optional Sidekiq. There is no application code, no test suite, and no build — just shell scripts and Markdown reference docs. All scripts are designed to run **on the target VPS** (not locally) and are idempotent.
+A small set of bash scripts that provision and harden an Ubuntu 24.04 VPS for hosting Ruby on Rails apps behind Nginx + Phusion Passenger, with PostgreSQL, Redis, and optional Sidekiq. There is no application code, no test suite, and no build — just shell scripts and Markdown reference docs. All scripts are designed to run **on the target VPS** (not locally) and are idempotent.
 
 ## Files
 

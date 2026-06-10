@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Ubuntu 22.04 VPS Setup Script for Multiple Ruby Applications
+# Ubuntu 24.04 VPS Setup Script for Multiple Ruby Applications
 ################################################################################
 #
 # IMPORTANT: DO NOT RUN THIS SCRIPT AS ROOT!
@@ -45,9 +45,9 @@ set -euo pipefail
 ################################################################################
 
 DEPLOY_USER="deploy"
-RUBY_VERSION="3.4.8"
+RUBY_VERSION="4.0.5"
 NODE_VERSION="24"
-# POSTGRESQL_VERSION="16"  # Not needed - using Ubuntu's default PostgreSQL 14
+# POSTGRESQL_VERSION="16"  # Not needed - using Ubuntu's default PostgreSQL 16
 
 ################################################################################
 # Color codes for output
@@ -282,7 +282,7 @@ else
 fi
 
 ################################################################################
-# Install PostgreSQL (Ubuntu default - version 14)
+# Install PostgreSQL (Ubuntu default - version 16)
 ################################################################################
 
 log_info "Installing PostgreSQL..."
@@ -297,7 +297,7 @@ else
         postgresql-contrib \
         libpq-dev
 
-    INSTALLED_PG_VERSION=$(psql --version 2>/dev/null || echo "PostgreSQL 14")
+    INSTALLED_PG_VERSION=$(psql --version 2>/dev/null || echo "PostgreSQL 16")
     log_success "PostgreSQL installed: $INSTALLED_PG_VERSION"
 fi
 
@@ -510,7 +510,7 @@ if [ ! -f /etc/apt/sources.list.d/passenger.list ]; then
         gpg --dearmor | \
         sudo tee /etc/apt/trusted.gpg.d/phusionpassenger.gpg >/dev/null
 
-    sudo sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger jammy main > /etc/apt/sources.list.d/passenger.list'
+    sudo sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger noble main > /etc/apt/sources.list.d/passenger.list'
 
     sudo apt-get update -qq
 else

@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# Rails/Sinatra Application Setup Script for Ubuntu 22.04
+# Rails/Sinatra Application Setup Script for Ubuntu 24.04
 ################################################################################
 #
 # This script sets up a single Rails or Sinatra application on a VPS that has
