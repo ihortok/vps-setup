@@ -861,6 +861,58 @@ Common values:
 
 ---
 
+## Security Alert Notifications
+
+By default the setup scripts configure fail2ban and unattended-upgrades to log locally only. To receive email alerts follow the steps below.
+
+### fail2ban — email on ban
+
+Install a mail transfer agent (postfix is the simplest on Ubuntu):
+
+```bash
+sudo apt-get install -y postfix mailutils
+```
+
+Edit `/etc/fail2ban/jail.local` and update the `[DEFAULT]` section:
+
+```ini
+destemail = your@email.com
+sendername = Fail2Ban-VPS
+# action_mwl = ban + send email with whois info and log excerpt
+action = %(action_mwl)s
+```
+
+Then restart fail2ban:
+
+```bash
+sudo systemctl restart fail2ban
+```
+
+Test the alert:
+
+```bash
+sudo fail2ban-client set sshd banip 127.0.0.2
+# Check inbox, then unban:
+sudo fail2ban-client set sshd unbanip 127.0.0.2
+```
+
+### unattended-upgrades — email on change
+
+Edit `/etc/apt/apt.conf.d/50unattended-upgrades` and add/update these lines:
+
+```
+Unattended-Upgrade::Mail "your@email.com";
+Unattended-Upgrade::MailReport "on-change";
+```
+
+Test with a dry run:
+
+```bash
+sudo unattended-upgrade --dry-run --debug 2>&1 | head -30
+```
+
+---
+
 ## Additional Resources
 
 - [Nginx Documentation](https://nginx.org/en/docs/)

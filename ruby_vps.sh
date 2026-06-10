@@ -249,7 +249,11 @@ fi
 
 if [ "$NEEDS_NODE_INSTALL" = true ]; then
     log_info "Adding NodeSource repository..."
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" | sudo -E bash -
+    # Download to a temp file first so the script can be inspected before execution.
+    NODESOURCE_SETUP=$(mktemp /tmp/nodesource_setup.XXXXXX.sh)
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_VERSION}.x" -o "$NODESOURCE_SETUP"
+    sudo -E bash "$NODESOURCE_SETUP"
+    rm -f "$NODESOURCE_SETUP"
 
     log_info "Installing Node.js..."
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nodejs
@@ -483,6 +487,11 @@ else
     unset REDIS_PASSWORD_CONFIRM
     unset CONFIRM_PASSWORD
 
+    # Restrict redis.conf to root:redis (640) so it is not world-readable.
+    # The ACL line written above contains the plaintext password.
+    sudo chmod 640 "$REDIS_CONF"
+    sudo chown root:redis "$REDIS_CONF"
+
     log_success "Redis ACL configured in /etc/redis/redis.conf"
     log_info "Redis bound to localhost; default user requires password"
     log_info "CONFIG/FLUSHDB/FLUSHALL/DEBUG/SHUTDOWN/KEYS denied for external clients"
@@ -506,7 +515,7 @@ if [ ! -f /etc/apt/sources.list.d/passenger.list ]; then
     log_info "Adding Passenger APT repository..."
     sudo apt-get install -y -qq --no-install-recommends dirmngr gnupg apt-transport-https ca-certificates curl
 
-    curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | \
+    curl -fsSL https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | \
         gpg --dearmor | \
         sudo tee /etc/apt/trusted.gpg.d/phusionpassenger.gpg >/dev/null
 
@@ -579,15 +588,42 @@ else
     log_info "Default Nginx site already disabled"
 fi
 
+# Add a catch-all default_server that silently drops unmatched requests (return 444).
+# Without this, requests with an unknown Host header fall through to the first
+# alphabetical vhost, which can leak content or error details.
+DEFAULT_VHOST="/etc/nginx/sites-available/00-default-drop"
+if [ ! -f "$DEFAULT_VHOST" ]; then
+    log_info "Creating default_server catch-all vhost (drops unmatched requests)..."
+    sudo tee "$DEFAULT_VHOST" > /dev/null <<'NGINXEOF'
+# Catch-all server block: silently drop requests that don't match any real vhost.
+# Placed first alphabetically (00-) so it is selected as the default_server.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+NGINXEOF
+    sudo ln -sf "$DEFAULT_VHOST" /etc/nginx/sites-enabled/00-default-drop
+    log_success "Default catch-all vhost created (HTTP 444 for unmatched hosts)"
+else
+    log_info "Default catch-all vhost already exists"
+fi
+
 # Configure global rate limiting directive
 log_info "Configuring global rate limiting settings..."
 NGINX_CONF="/etc/nginx/nginx.conf"
 if ! sudo grep -q "limit_req_status" "$NGINX_CONF"; then
-    # Add limit_req_status to http block (after the opening http {)
-    sudo sed -i '/^http {/a \    # Global rate limiting status code (429 = Too Many Requests)\n    limit_req_status 429;' "$NGINX_CONF"
-    log_success "Global rate limiting configured (HTTP 429 for rate-limited requests)"
+    # Add limit_req_status and server_tokens to http block (after the opening http {)
+    sudo sed -i '/^http {/a \    # Global rate limiting status code (429 = Too Many Requests)\n    limit_req_status 429;\n    # Hide Nginx version from error pages and Server: header\n    server_tokens off;' "$NGINX_CONF"
+    log_success "Global rate limiting configured (HTTP 429) and server_tokens disabled"
 else
     log_info "Global rate limiting already configured"
+fi
+
+if ! sudo grep -q "server_tokens" "$NGINX_CONF"; then
+    sudo sed -i '/^http {/a \    # Hide Nginx version from error pages and Server: header\n    server_tokens off;' "$NGINX_CONF"
+    log_success "server_tokens disabled in nginx.conf"
 fi
 
 log_success "Passenger + Nginx configured and running"
@@ -795,97 +831,58 @@ log_success "Firewall configured"
 # SSH Hardening Check and Configuration
 ################################################################################
 
-log_info "Checking SSH security configuration..."
+log_info "Hardening SSH configuration..."
 
-SSHD_CONFIG="/etc/ssh/sshd_config"
-SSH_NEEDS_RELOAD=false
-
-# Check if password authentication is disabled
-if sudo grep -q "^PasswordAuthentication yes" "$SSHD_CONFIG"; then
-    log_warning "Password authentication is ENABLED"
-    echo ""
-    echo "For maximum security, password authentication should be disabled."
-    echo "This forces SSH key-only authentication."
-    echo ""
-    echo "Options:"
-    echo "  1. Disable it now (recommended if you have SSH keys configured)"
-    echo "  2. Keep it enabled (you can disable it later via VPS admin panel)"
-    echo ""
-    read -p "Disable password authentication now? (y/N): " -n 1 -r
-    echo ""
-
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Disabling password authentication..."
-        sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' "$SSHD_CONFIG"
-
-        # Also ensure it's not commented out elsewhere
-        if sudo grep -q "^#PasswordAuthentication" "$SSHD_CONFIG"; then
-            sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' "$SSHD_CONFIG"
-        fi
-
-        SSH_NEEDS_RELOAD=true
-        log_success "Password authentication disabled"
-    else
-        log_warning "Password authentication still enabled. Disable it later via:"
-        log_warning "  - VPS admin panel (when reinstalling OS), OR"
-        log_warning "  - Run: sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' $SSHD_CONFIG && sudo systemctl reload sshd"
-    fi
-elif sudo grep -q "^PasswordAuthentication no" "$SSHD_CONFIG"; then
-    log_success "Password authentication is already disabled (SSH key-only)"
-else
-    # Not explicitly set, check default
-    log_info "Password authentication setting not explicit, checking default..."
-    if sudo sshd -T | grep -q "passwordauthentication yes"; then
-        log_warning "Password authentication is enabled by default"
-        echo ""
-        read -p "Disable password authentication now? (y/N): " -n 1 -r
-        echo ""
-
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Disabling password authentication..."
-            echo "" | sudo tee -a "$SSHD_CONFIG" >/dev/null
-            echo "# Disable password authentication (SSH key-only)" | sudo tee -a "$SSHD_CONFIG" >/dev/null
-            echo "PasswordAuthentication no" | sudo tee -a "$SSHD_CONFIG" >/dev/null
-            SSH_NEEDS_RELOAD=true
-            log_success "Password authentication disabled"
-        fi
-    else
-        log_success "Password authentication is disabled by default"
-    fi
+# Safety check: verify the current user has a working SSH key before locking down.
+# We test by checking that ~/.ssh/authorized_keys exists and is non-empty, which
+# means key-based auth is available and disabling passwords won't lock us out.
+if [ ! -s "$HOME/.ssh/authorized_keys" ]; then
+    log_error "No SSH authorized_keys found for $USER. Aborting SSH hardening to prevent lockout."
+    log_error "Add your public key to $HOME/.ssh/authorized_keys, then re-run."
+    exit 1
 fi
 
-# Check root login
-echo ""
-log_info "Checking root login configuration..."
-if sudo grep -q "^PermitRootLogin yes" "$SSHD_CONFIG"; then
-    log_warning "Root login is ENABLED"
-    read -p "Disable root login via SSH? (y/N): " -n 1 -r
-    echo ""
+SSH_DROP_IN="/etc/ssh/sshd_config.d/99-hardened.conf"
+SSH_DROP_IN_WRITTEN=false
 
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Disabling root login..."
-        sudo sed -i 's/^PermitRootLogin yes/PermitRootLogin no/' "$SSHD_CONFIG"
-        SSH_NEEDS_RELOAD=true
-        log_success "Root login disabled"
-    fi
-elif sudo grep -q "^PermitRootLogin no" "$SSHD_CONFIG"; then
-    log_success "Root login is already disabled"
+if [ ! -f "$SSH_DROP_IN" ]; then
+    sudo tee "$SSH_DROP_IN" > /dev/null <<'SSHEOF'
+# Hardened SSH settings applied by ruby_vps.sh
+# These override defaults in /etc/ssh/sshd_config via drop-in.
+# Edit this file directly to adjust settings; it is NOT overwritten on re-runs.
+
+PasswordAuthentication no
+PermitRootLogin no
+MaxAuthTries 3
+LoginGraceTime 60
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+# local = allow -L local port forwarding (Postgres/Redis debugging), block -R remote forwarding
+AllowTcpForwarding local
+SSHEOF
+    sudo chmod 600 "$SSH_DROP_IN"
+    SSH_DROP_IN_WRITTEN=true
 else
-    log_info "Root login setting uses default (usually prohibit-password)"
+    log_info "SSH drop-in already exists, skipping write: $SSH_DROP_IN"
 fi
 
-# Reload SSH if changes were made
-if [ "$SSH_NEEDS_RELOAD" = true ]; then
-    echo ""
-    log_info "Reloading SSH service to apply changes..."
-    sudo systemctl reload sshd
-    log_success "SSH service reloaded"
-    echo ""
-    log_warning "⚠️  IMPORTANT: Test SSH connection in a NEW terminal before closing this one!"
-    log_warning "⚠️  If you get locked out, you can still access via VPS console."
-    echo ""
-    read -p "Press ENTER after you've tested SSH in another terminal..." -r
-    echo ""
+# Validate and reload only when the drop-in was newly written
+if [ "$SSH_DROP_IN_WRITTEN" = true ]; then
+    if sudo sshd -t; then
+        sudo systemctl reload sshd
+        log_success "SSH hardened: password auth off, root login off, MaxAuthTries 3"
+        echo ""
+        log_warning "⚠️  IMPORTANT: Test SSH key login in a NEW terminal before closing this one!"
+        log_warning "⚠️  If you get locked out, you can still access via VPS console."
+        echo ""
+        read -p "Press ENTER after you've confirmed SSH key login works..." -r
+        echo ""
+    else
+        log_error "sshd config validation failed — drop-in NOT applied. Check $SSH_DROP_IN"
+        sudo rm -f "$SSH_DROP_IN"
+        exit 1
+    fi
 fi
 
 log_success "SSH security configuration complete"

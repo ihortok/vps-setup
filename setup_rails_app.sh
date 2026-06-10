@@ -373,6 +373,23 @@ if [ -f "$NGINX_CONFIG" ]; then
     sudo cp "$NGINX_CONFIG" "${NGINX_CONFIG}.bak"
 fi
 
+# Write shared security headers snippet (idempotent).
+# Using a snippet ensures add_header directives apply even inside location blocks
+# that define their own add_header, which would otherwise suppress server-level inheritance.
+SECURITY_HEADERS_SNIPPET="/etc/nginx/snippets/security-headers.conf"
+if [ ! -f "$SECURITY_HEADERS_SNIPPET" ]; then
+    sudo mkdir -p /etc/nginx/snippets
+    sudo tee "$SECURITY_HEADERS_SNIPPET" > /dev/null <<'SNIPEOF'
+# Shared security headers — include in every location block that has its own add_header.
+# Nginx does NOT inherit server-level add_header into location blocks with their own add_header.
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+SNIPEOF
+    log_success "Security headers snippet written to $SECURITY_HEADERS_SNIPPET"
+fi
+
 # Create Nginx virtual host config
 sudo tee "$NGINX_CONFIG" > /dev/null <<EOF
 # Nginx + Passenger configuration for $APP_NAME
@@ -395,16 +412,19 @@ server {
     passenger_ruby /home/$DEPLOY_USER/.rbenv/shims/ruby;
     passenger_preload_bundler on;
 
-    # Security headers
-    # Note: Most of these are also set by Rails by default (config.action_dispatch.default_headers)
-    # We set them at Nginx level as defense-in-depth for static files and error pages
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    # Security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy).
+    # Loaded from a shared snippet so the headers also apply inside location blocks that define
+    # their own add_header — Nginx does not inherit server-level add_header into such blocks.
+    include snippets/security-headers.conf;
 
-    # X-XSS-Protection is intentionally NOT included (deprecated, can cause vulnerabilities)
-    # Rails 7.1+ disables it by default. Use Content-Security-Policy instead.
+    # X-XSS-Protection is intentionally NOT included (deprecated, can cause vulnerabilities).
+    # Rails 7.1+ disables it by default.
+
+    # HSTS is applied only over HTTPS via /etc/nginx/snippets/ssl-params.conf (included after
+    # Certbot runs). Sending HSTS over HTTP is a no-op per RFC 6797 and is not set here.
+
+    # CSP is intentionally NOT set at the Nginx level — it is application-specific and must be
+    # configured in your Rails app: config/initializers/content_security_policy.rb
 
     # Client upload size (default 10MB)
     # Increase for specific endpoints if needed (e.g., location /uploads { client_max_body_size 100m; })
@@ -433,7 +453,10 @@ server {
     }
 
     # Assets and static files (no rate limiting for static assets)
+    # security-headers.conf is re-included here because this block has its own add_header
+    # (Cache-Control), which suppresses server-level add_header inheritance in Nginx.
     location ~ ^/(assets|packs) {
+        include snippets/security-headers.conf;
         gzip_static on;
         expires max;
         add_header Cache-Control public;
@@ -443,6 +466,26 @@ server {
     error_page 500 502 503 504 /500.html;
     error_page 404 /404.html;
     error_page 422 /422.html;
+
+    # Block sensitive file probes — return 444 (no response) to avoid confirming app presence.
+    # The vhost root is current/public so these files shouldn't be reachable anyway, but this
+    # protects against accidental commits and stops scanner noise reaching Passenger.
+
+    # .env variants (.env, .env.production, .env.local, etc.), key/cert files, dotfiles
+    location ~* (\.env|\.key|\.pem|\.npmrc|\.htaccess|\.DS_Store|\.config)$ {
+        return 444;
+    }
+
+    # Git directory probes (/.git/config, /.git/HEAD, etc.) — the most common scanner target.
+    # Matched as a path prefix, not an extension, because the threat is /.git/<anything>.
+    location ~ /\.git {
+        return 444;
+    }
+
+    # SSH and private key path probes
+    location ~* /(\.ssh|id_rsa|id_ed25519|private_key|server\.key) {
+        return 444;
+    }
 }
 EOF
 
@@ -480,6 +523,58 @@ if [ "$REQUEST_SSL" = true ]; then
 
     # Run certbot with Nginx plugin
     sudo certbot --nginx -d "$DOMAIN"
+
+    # Write a hardened SSL parameters snippet and include it in the vhost.
+    # Certbot's defaults may permit TLS 1.0/1.1; this enforces TLS 1.2+ and
+    # strong AEAD cipher suites.
+    SSL_PARAMS="/etc/nginx/snippets/ssl-params.conf"
+    if [ ! -f "$SSL_PARAMS" ]; then
+        sudo mkdir -p /etc/nginx/snippets
+        sudo tee "$SSL_PARAMS" > /dev/null <<'SSLEOF'
+# Hardened SSL/TLS parameters — included by each HTTPS vhost.
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers on;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256;
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:10m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+# Use systemd-resolved (127.0.0.53) — always available on Ubuntu, no privacy concern.
+resolver 127.0.0.53 valid=300s;
+resolver_timeout 5s;
+# HSTS: 1-year, no includeSubDomains (safe default; escalate manually when all subdomains are HTTPS).
+add_header Strict-Transport-Security "max-age=31536000" always;
+SSLEOF
+        log_success "SSL hardening parameters written to $SSL_PARAMS"
+    fi
+
+    # Write a Certbot deploy hook that re-injects the ssl-params include after each renewal.
+    # certbot renew rewrites the vhost and silently removes any manually injected include lines,
+    # so this hook re-adds it every time a certificate is successfully renewed.
+    CERTBOT_HOOK="/etc/letsencrypt/renewal-hooks/deploy/nginx-ssl-params.sh"
+    if [ ! -f "$CERTBOT_HOOK" ]; then
+        sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+        sudo tee "$CERTBOT_HOOK" > /dev/null <<'HOOKEOF'
+#!/bin/bash
+# Certbot deploy hook: re-apply ssl-params.conf include after each renewal.
+for conf in /etc/nginx/sites-enabled/*; do
+    if grep -q "listen 443" "$conf" && ! grep -q "ssl-params.conf" "$conf"; then
+        sed -i "/listen 443 ssl/a\\    include snippets\/ssl-params.conf;" "$conf"
+    fi
+done
+nginx -t && systemctl reload nginx
+HOOKEOF
+        sudo chmod 755 "$CERTBOT_HOOK"
+        log_success "Certbot deploy hook written to $CERTBOT_HOOK"
+    fi
+
+    # Apply the ssl-params include now (the hook handles future renewals)
+    if sudo grep -q "listen 443" "$NGINX_CONFIG" && ! sudo grep -q "ssl-params.conf" "$NGINX_CONFIG"; then
+        sudo sed -i "/listen 443 ssl/a\\    include snippets\/ssl-params.conf;" "$NGINX_CONFIG"
+        sudo nginx -t && sudo systemctl reload nginx
+        log_success "SSL hardening parameters applied to $APP_NAME vhost"
+    fi
 else
     log_info "SSL certificate not requested (use --request-ssl to enable)"
 fi
@@ -676,6 +771,21 @@ if [ "$SETUP_SIDEKIQ" = true ]; then
     echo ""
     NEXT_STEP=$((NEXT_STEP + 1))
 fi
+
+echo "$NEXT_STEP. Add a Capistrano task to fix file permissions after every deploy:"
+echo "   Create ${BLUE}lib/capistrano/tasks/permissions.rake${NC} in your Rails app:"
+echo ""
+echo "   ${BLUE}namespace :deploy do${NC}"
+echo "   ${BLUE}  after :finished, :fix_permissions do${NC}"
+echo "   ${BLUE}    on roles(:app) do${NC}"
+echo "   ${BLUE}      execute :chmod, \"-R u+rwX,g+rX,o-rwx \#{release_path}/public\"${NC}"
+echo "   ${BLUE}      execute :chmod, \"-R u+rwX,g+rwX,o-rwx \#{shared_path}/log \#{shared_path}/tmp \#{shared_path}/pids\"${NC}"
+echo "   ${BLUE}      execute :chmod, \"600 \#{shared_path}/config/credentials/*.key\"${NC}"
+echo "   ${BLUE}    end${NC}"
+echo "   ${BLUE}  end${NC}"
+echo "   ${BLUE}end${NC}"
+echo ""
+NEXT_STEP=$((NEXT_STEP + 1))
 
 echo "$NEXT_STEP. Deploy your application:"
 echo "   ${BLUE}cap $RAILS_ENV deploy${NC}"
