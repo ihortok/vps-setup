@@ -515,9 +515,9 @@ if [ ! -f /etc/apt/sources.list.d/passenger.list ]; then
     log_info "Adding Passenger APT repository..."
     sudo apt-get install -y -qq --no-install-recommends dirmngr gnupg apt-transport-https ca-certificates curl
 
-    curl -fsSL https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt | \
+    curl -fsSL https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt | \
         gpg --dearmor | \
-        sudo tee /etc/apt/trusted.gpg.d/phusionpassenger.gpg >/dev/null
+        sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null
 
     sudo sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger noble main > /etc/apt/sources.list.d/passenger.list'
 
