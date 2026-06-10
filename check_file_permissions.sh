@@ -234,6 +234,56 @@ else
 fi
 echo ""
 
+echo "11. VPS-SETUP DIRECTORY (if present)"
+echo "----------------------------------------"
+if [ -d "$HOME/vps-setup" ]; then
+    check_path "$HOME/vps-setup" "750" "vps-setup directory"
+
+    # Group-writable files: www-data is in deploy group, so it could modify scripts
+    # or .git/hooks — which run as deploy when git pull is executed (privilege escalation)
+    group_writable=$(find "$HOME/vps-setup" -perm -020 2>/dev/null)
+    if [ -z "$group_writable" ]; then
+        echo -e "${GREEN}✓ No group-writable files in vps-setup${NC}"
+    else
+        echo -e "${RED}✗ Group-writable files found (www-data in deploy group can modify these):${NC}"
+        echo "$group_writable"
+        echo -e "   ${YELLOW}Fix: chmod -R g-w ~/vps-setup${NC}"
+    fi
+    echo ""
+
+    world_accessible=$(find "$HOME/vps-setup" -perm /007 2>/dev/null | head -5)
+    if [ -z "$world_accessible" ]; then
+        echo -e "${GREEN}✓ No world-accessible files in vps-setup${NC}"
+    else
+        echo -e "${YELLOW}⚠ World-accessible files (server config details exposed to any system user):${NC}"
+        echo "$world_accessible" | head -5
+        echo -e "   ${YELLOW}Fix: chmod -R o-rwx ~/vps-setup${NC}"
+    fi
+    echo ""
+
+    hooks_writable=$(find "$HOME/vps-setup/.git/hooks" -perm -020 2>/dev/null)
+    if [ -z "$hooks_writable" ]; then
+        echo -e "${GREEN}✓ .git/hooks not group-writable${NC}"
+    else
+        echo -e "${RED}✗ .git/hooks group-writable (git hook poisoning risk — runs as deploy on git pull):${NC}"
+        echo "$hooks_writable"
+    fi
+    echo ""
+
+    scripts_open=$(find "$HOME/vps-setup" -maxdepth 1 -name "*.sh" -perm /077 2>/dev/null)
+    if [ -z "$scripts_open" ]; then
+        echo -e "${GREEN}✓ Shell scripts have no group/world permissions${NC}"
+    else
+        echo -e "${YELLOW}⚠ Shell scripts have group/world bits set:${NC}"
+        ls -la "$HOME/vps-setup/"*.sh 2>/dev/null
+        echo -e "   ${YELLOW}Fix: chmod 700 ~/vps-setup/*.sh${NC}"
+    fi
+    echo ""
+else
+    echo -e "${BLUE}vps-setup directory not present — skipping${NC}"
+    echo ""
+fi
+
 echo "========================================================================"
 echo "SUMMARY & RECOMMENDATIONS"
 echo "========================================================================"

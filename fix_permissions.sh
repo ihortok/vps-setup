@@ -173,6 +173,19 @@ if [ -d "$HOME/apps" ]; then
     done
 fi
 
+# Fix vps-setup directory permissions (if present)
+# www-data is in the deploy group; group-writable .git/hooks allows git hook poisoning
+# (hooks execute as deploy on git pull — privilege escalation via compromised www-data)
+if [ -d "$HOME/vps-setup" ]; then
+    log_info "Fixing vps-setup directory permissions..."
+
+    chmod -R g-w "$HOME/vps-setup"
+    chmod -R o-rwx "$HOME/vps-setup"
+    chmod 750 "$HOME/vps-setup"
+
+    log_success "vps-setup: removed group-write and world bits recursively (covers .git/hooks)"
+fi
+
 echo ""
 log_info "Checking for security issues..."
 
@@ -222,6 +235,7 @@ echo "  - apps/*/current/public:           group-readable (for Nginx)"
 echo "  - apps/*/shared/log,tmp:           770 (drwxrwx---)"
 echo "  - Credential files (*.key):        600 (-rw-------)"
 echo "  - Dev tools (.bundle, .yarn, etc): 700 (drwx------)"
+echo "  - vps-setup/ (if present):         750, no group-write, no world bits"
 echo ""
 echo "Security Checks:"
 echo "  - World-writable files: $([ -z "$world_writable" ] && echo "None (good)" || echo "Found (see above)")"
