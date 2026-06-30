@@ -63,6 +63,23 @@ bash fix_permissions.sh
 - Credential files (600)
 - Development tool directories (700)
 
+### `backup.sh`
+Backs up the two pieces of state that can't be re-provisioned from the scripts: the deploy-owned PostgreSQL databases and each app's `shared/storage` folder. Run as the `deploy` user, it detects what's available, prompts for a selection (or accepts flags for non-interactive runs), writes everything to `/home/deploy/backup_YYYY_MM_DD/`, and archives it to `.tar.gz`. Makes no changes to the host.
+
+**Usage:**
+```bash
+# Interactive
+bash backup.sh
+
+# Non-interactive
+bash backup.sh --all
+bash backup.sh --dbs wallet_production --storage wallet -y
+```
+
+**Options:** `--all`, `--dbs "a,b"`, `--storage "a,b"`, `--output-dir DIR`, `--no-archive`, `--keep-folder`, `-y/--yes`.
+
+See [OPERATIONS.md](OPERATIONS.md#backups) for the output layout and restore commands.
+
 ## Security Features
 
 - **Execute-only directory permissions (710)** - Prevents directory enumeration while allowing traversal

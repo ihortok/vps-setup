@@ -12,6 +12,7 @@ A small set of bash scripts that provision and harden an Ubuntu 24.04 VPS for ho
 - `setup_rails_app.sh APP_NAME DOMAIN [OPTIONS]` — per-app provisioning: directory tree, PostgreSQL DB, Nginx vhost, optional Certbot SSL (`--request-ssl`) and Sidekiq systemd unit (`--setup-sidekiq`). DB name defaults to `${APP_NAME}_production`.
 - `fix_permissions.sh` — idempotent re-audit/fix of all expected permissions on an existing install. Safe to re-run anytime, including after a Capistrano deploy.
 - `check_file_permissions.sh` — read-only audit reporting actual vs. expected permissions; makes no changes.
+- `backup.sh [OPTIONS]` — interactive (or flag-driven via `--all` / `--dbs` / `--storage`) backup of deploy-owned PostgreSQL databases and per-app `shared/storage` folders into `/home/deploy/backup_YYYY_MM_DD/`, then archived to `.tar.gz`. Read-safe; makes no host changes. Restore steps live in `OPERATIONS.md` under "Backups".
 - `OPERATIONS.md` — day-2 reference (fail2ban, UFW, Nginx logs, permission troubleshooting). Consult this before inventing commands for those topics.
 - `README.md` — user-facing overview and the canonical source for the Capistrano `deploy.rb` / `Capfile` snippets.
 

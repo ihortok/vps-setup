@@ -678,7 +678,16 @@ production.key                      600  -rw-------  (owner-only)
 /home/deploy/.yarn                  700  drwx------  (owner-only)
 /home/deploy/.rbenv                 750  drwxr-x---  (group read-only)
 /home/deploy/.passenger             750  drwxr-x---  (NOT 777!)
+
+# Backup artifacts (created by backup.sh — see "Backups" below)
+/home/deploy/backup_*               750  drwxr-x---  (group can traverse)
+/home/deploy/backup_*/**/*.sql      600  -rw-------  (DB dumps, owner-only)
+/home/deploy/backup_*.tar.gz        600  -rw-------  (archive, owner-only)
 ```
+
+> Backup artifacts are transient and created ad hoc, so they are intentionally
+> **not** enforced by `fix_permissions.sh` or audited by `check_file_permissions.sh`
+> (those target the permanent install). `backup.sh` sets these modes itself.
 
 ### Check Current Permissions
 
@@ -909,6 +918,70 @@ Test with a dry run:
 
 ```bash
 sudo unattended-upgrade --dry-run --debug 2>&1 | head -30
+```
+
+---
+
+## Backups
+
+`backup.sh` snapshots the two pieces of state that cannot be re-provisioned from
+the setup scripts: the **deploy-owned PostgreSQL databases** (the `*_production`
+app DBs) and each app's **Active Storage folder** (`apps/<app>/shared/storage`).
+It detects what is available, lets you pick what to back up, writes everything to
+`/home/deploy/backup_YYYY_MM_DD/`, then archives that folder to `.tar.gz`.
+
+Run as the `deploy` user (PostgreSQL peer authentication means `pg_dump` needs no
+password). The script makes no changes to the host — it only reads and writes the
+backup.
+
+### Run a backup
+
+```bash
+# Interactive — lists databases and storage folders, prompts for a selection
+bash /home/deploy/vps-setup/backup.sh
+
+# Non-interactive options:
+bash backup.sh --all                                   # everything detected
+bash backup.sh --dbs wallet_production --storage wallet -y
+bash backup.sh --output-dir /mnt/backups --no-archive  # plain folder elsewhere
+```
+
+| Option | Effect |
+|--------|--------|
+| `--all` | Back up every detected DB and storage folder (no prompts) |
+| `--dbs "a,b"` | Comma/space-separated DB names (no prompt) |
+| `--storage "a,b"` | Comma/space-separated app names whose storage to back up |
+| `--output-dir DIR` | Parent dir for the backup folder (default `/home/deploy`) |
+| `--no-archive` | Leave the plain `backup_DATE/` folder, skip the `.tar.gz` |
+| `--keep-folder` | Keep the working folder after a successful archive |
+| `-y, --yes` | Skip the final confirmation prompt |
+
+### Output layout
+
+```
+backup_2026_06_30/
+├── MANIFEST.txt              # contents + restore hints
+├── databases/<db>.sql        # plain SQL (pg_dump --clean --if-exists --no-owner --no-privileges)
+└── storage/<app>/…           # cp -a of apps/<app>/shared/storage
+→ archived to /home/deploy/backup_2026_06_30.tar.gz   (mode 600)
+```
+
+A second run on the same day appends a `_HHMMSS` suffix instead of overwriting.
+
+### Restore
+
+```bash
+# Extract the archive
+tar -xzf backup_2026_06_30.tar.gz
+cd backup_2026_06_30
+
+# Restore a database (run as deploy; peer authentication, no password)
+createdb -O deploy <db>                 # only if the database does not exist yet
+psql -d <db> -f databases/<db>.sql      # dump is --clean --if-exists, so it is idempotent
+
+# Restore a storage folder, then re-audit permissions
+cp -a storage/<app>/. /home/deploy/apps/<app>/shared/storage/
+bash /home/deploy/vps-setup/fix_permissions.sh
 ```
 
 ---
