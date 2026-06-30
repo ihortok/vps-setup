@@ -239,13 +239,15 @@ log_success "Running as $DEPLOY_USER user"
 # Detect PostgreSQL databases (deploy-owned, via peer authentication)
 ################################################################################
 
-if ! psql -tAc "SELECT 1" >/dev/null 2>&1; then
+# Connect to the always-present 'postgres' database: a bare `psql` would target a
+# database named after the OS user ('deploy'), which does not exist under peer auth.
+if ! psql -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then
     log_error "Cannot connect to PostgreSQL as '$DEPLOY_USER' over the unix socket."
     exit 1
 fi
 
 DETECTED_DBS=()
-mapfile -t DETECTED_DBS < <(psql -tAc \
+mapfile -t DETECTED_DBS < <(psql -d postgres -tAc \
     "SELECT d.datname FROM pg_database d
        JOIN pg_roles r ON d.datdba = r.oid
       WHERE d.datistemplate = false
