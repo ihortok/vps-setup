@@ -11,27 +11,34 @@
 # 1. SSH into your VPS as root:
 #    ssh root@your-vps-ip
 #
-# 2. Create a deploy user:
+# 2. Change the root password:
+#    passwd
+#
+# 3. Create a deploy user:
 #    adduser deploy
 #
-# 3. Add deploy to the sudo group:
+# 4. Add deploy to the sudo group:
 #    usermod -aG sudo deploy
 #
-# 4. Configure SSH authorized keys for the deploy user:
+# 5. Configure SSH authorized keys for the deploy user:
 #    mkdir -p /home/deploy/.ssh
 #    cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
 #    chown -R deploy:deploy /home/deploy/.ssh
 #    chmod 700 /home/deploy/.ssh
 #    chmod 600 /home/deploy/.ssh/authorized_keys
 #
-# 5. (Optional) Test SSH login as deploy user from another terminal before logging out as root
+# 6. (Optional) Test SSH login as deploy user from another terminal before logging out as root
 #
-# 6. Exit root session and log in as deploy user:
+# 7. Exit root session and log in as deploy user:
 #    exit
 #    ssh deploy@your-vps-ip
 #
-# 7. Copy this script to the server and run it as the deploy user:
-#    bash ruby_vps.sh
+# 8. Install git and clone this repository (sudo required for git install):
+#    sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends git
+#    git clone https://github.com/ihortok/vps-setup.git ~/vps-setup
+#
+# 9. Run this script as the deploy user:
+#    bash ~/vps-setup/ruby_vps.sh
 #
 # This script is idempotent and safe to re-run.
 #
