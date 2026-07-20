@@ -576,6 +576,130 @@ scp deploy@server:/tmp/nginx_errors.txt ./
 
 ---
 
+## PostgreSQL (psql) Commands
+
+PostgreSQL uses **peer authentication** (see `CLAUDE.md`) — no passwords are
+configured, and there are no `listen_addresses`/port changes or UFW rules for
+5432. Connect as the matching OS user over the local unix socket; `sudo -u
+postgres` is only needed for admin-level actions like creating databases.
+
+### Connecting
+
+```bash
+# Admin session (Postgres superuser, via OS-level sudo)
+sudo -u postgres psql
+
+# As the deploy user — must be run while logged in as deploy (peer auth)
+psql -d postgres
+
+# Connect directly to a specific app's database
+psql -d myapp_production
+```
+
+### Querying Application Data
+
+```bash
+# Run a one-off query against an app's database without an interactive session
+psql -d myapp_production -c "SELECT email FROM users;"
+
+# Count rows in a table
+psql -d myapp_production -c "SELECT count(*) FROM users;"
+
+# Group and count (e.g. users per status)
+psql -d myapp_production -c "SELECT status, count(*) FROM users GROUP BY status ORDER BY count(*) DESC;"
+
+# Most recent rows
+psql -d myapp_production -c "SELECT id, email, created_at FROM users ORDER BY created_at DESC LIMIT 10;"
+
+# List tables in the database
+psql -d myapp_production -c '\dt'
+```
+
+### Listing Databases and Roles
+
+```bash
+# All databases / all roles
+psql -d postgres -c '\l'
+psql -d postgres -c '\du'
+
+# Databases owned by deploy — the same query backup.sh uses to auto-detect
+# what it will back up (see backup.sh)
+psql -d postgres -c "SELECT d.datname FROM pg_database d JOIN pg_roles r ON d.datdba = r.oid WHERE d.datistemplate = false AND r.rolname = 'deploy' ORDER BY d.datname;"
+```
+
+### Database and Table Sizes
+
+```bash
+# Size of every non-template database, largest first
+psql -d postgres -c "SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database WHERE datistemplate = false ORDER BY pg_database_size(datname) DESC;"
+
+# Largest tables within one app's database
+psql -d myapp_production -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 20;"
+```
+
+### Connections and Activity
+
+```bash
+# Active connections/queries across all databases
+psql -d postgres -c "SELECT pid, usename, datname, state, query, query_start FROM pg_stat_activity WHERE datname IS NOT NULL;"
+
+# Connection count per database
+psql -d postgres -c "SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname ORDER BY count(*) DESC;"
+
+# Kill a stuck query/connection (get the pid from pg_stat_activity above)
+psql -d postgres -c "SELECT pg_terminate_backend(<pid>);"
+```
+
+### Creating / Dropping a Database
+
+```bash
+# Create a new app database — matches what setup_rails_app.sh does
+# (owned by deploy; no password needed, peer auth)
+sudo -u postgres createdb -O deploy myapp_production
+
+# Drop a database (irreversible — take a backup first, see "Backups" below)
+sudo -u postgres dropdb myapp_production
+```
+
+> The `deploy` role itself (`sudo -u postgres createuser -d deploy`, granting
+> `CREATEDB` but not superuser) is created once by `ruby_vps.sh` — this is not
+> a day-2 action and should not need to be repeated.
+
+### Backup and Restore
+
+See the "Backups" section below for `backup.sh` usage and the exact
+`pg_dump`/`psql` restore commands — do not duplicate them here.
+
+### Service Management
+
+```bash
+sudo systemctl status postgresql
+sudo systemctl restart postgresql
+
+# Locate the active config file (useful since ruby_vps.sh leaves defaults untouched)
+sudo -u postgres psql -c "SHOW config_file;"
+```
+
+### Troubleshooting
+
+```bash
+# "FATAL: Peer authentication failed for user ..."
+# Cause: connecting as the wrong OS user, or passing -U/-h flags unnecessarily.
+# Fix: run psql while logged in as the OS user matching the Postgres role
+whoami   # should be 'deploy' (or 'postgres' via sudo -u postgres)
+
+# "FATAL: database ... does not exist"
+# Cause: DB name doesn't match the ${APP_NAME}_production convention
+# (or a custom --db-name was used in setup_rails_app.sh)
+psql -d postgres -c '\l'
+
+# "FATAL: sorry, too many clients already" / connection pool exhaustion
+psql -d postgres -c "SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname ORDER BY count(*) DESC;"
+psql -d postgres -c "SHOW max_connections;"
+```
+
+---
+
 ## Quick Troubleshooting
 
 ### Server is slow or unresponsive
