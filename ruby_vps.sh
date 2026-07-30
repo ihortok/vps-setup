@@ -52,7 +52,7 @@ set -euo pipefail
 ################################################################################
 
 DEPLOY_USER="deploy"
-RUBY_VERSION="4.0.5"
+RUBY_VERSION="4.0.6"
 NODE_VERSION="24"
 # POSTGRESQL_VERSION="16"  # Not needed - using Ubuntu's default PostgreSQL 16
 
